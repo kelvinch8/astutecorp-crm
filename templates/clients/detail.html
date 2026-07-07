@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}{{ client.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3>
+            {{ client.name }}
+            {% if client.archived %}
+            <span class="badge bg-secondary">Archived</span>
+            {% endif %}
+        </h3>
+        <p class="text-muted mb-0">UEN: <strong>{{ client.uen }}</strong> | Contact: {{ client.contact_person or '-' }}</p>
+    </div>
+    <div>
+        <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn btn-outline-secondary">Edit Client</a>
+        {% if client.archived %}
+        <form action="{{ url_for('client_unarchive', client_id=client.id) }}" method="post" class="d-inline">
+            <button type="submit" class="btn btn-outline-success">Restore to Active</button>
+        </form>
+        {% else %}
+        <form action="{{ url_for('client_archive', client_id=client.id) }}" method="post" class="d-inline"
+              onsubmit="return confirm('Archive {{ client.name }}? They will be hidden from the active list and dashboard.');">
+            <button type="submit" class="btn btn-outline-warning">Archive Client</button>
+        </form>
+        {% endif %}
+        <form action="{{ url_for('client_delete', client_id=client.id) }}" method="post" class="d-inline"
+              onsubmit="return confirm('Delete {{ client.name }}? This will permanently remove all deadlines, invoices, and notes for this client.');">
+            <button type="submit" class="btn btn-outline-danger">Delete Client</button>
+        </form>
+        <a href="{{ url_for('clients_list', view='archived' if client.archived else None) }}" class="btn btn-light">Back to List</a>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Deadlines -->
+    <div class="col-md-7">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between">
+                <span><strong>Deadlines</strong></span>
+                <div>
+                    <form action="{{ url_for('calculate_deadlines', client_id=client.id) }}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-outline-primary">Calculate Defaults from FYE</button>
+                    </form>
+                    <a href="{{ url_for('deadline_new', client_id=client.id) }}" class="btn btn-sm btn-success">+ Add Deadline</a>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <table class="table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Due Date</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for dl in deadlines %}
+                        <tr class="{{ 'table-danger' if dl.is_overdue else '' }}">
+                            <td>
+                                <strong>{{ dl.deadline_type | deadline_label }}</strong>
+                                {% if dl.comments %}
+                                <div class="text-muted small mt-1">{{ dl.comments }}</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ dl.due_date | format_date }}</td>
+                            <td>
+                                {% if dl.status == 'Completed' %}
+                                    <span class="badge bg-success">Completed</span>
+                                {% elif dl.is_overdue %}
+                                    <span class="badge bg-danger">Overdue</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">Pending ({{ dl.get_days_left() }} days)</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-nowrap">
+                                <div class="d-flex flex-nowrap align-items-center gap-1">
+                                    <a href="{{ url_for('deadline_edit', client_id=client.id, dl_id=dl.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                                    {% if dl.status != 'Completed' %}
+                                    <form action="{{ url_for('deadline_complete', client_id=client.id, dl_id=dl.id) }}" method="post" class="m-0">
+                                        <button class="btn btn-sm btn-success">Mark Complete</button>
+                                    </form>
+                                    {% endif %}
+                                    <form action="{{ url_for('deadline_delete', client_id=client.id, dl_id=dl.id) }}" method="post" class="m-0"
+                                          onsubmit="return confirm('Delete this {{ dl.deadline_type | deadline_label }} deadline?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted">No deadlines recorded.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Note -->
+    <div class="col-md-5">
+        <div class="card mb-4">
+            <div class="card-header"><strong>Add Note / Activity</strong></div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('note_new', client_id=client.id) }}">
+                    {{ note_form.hidden_tag() }}
+                    <div class="mb-2">
+                        {{ note_form.title(class="form-control", placeholder="Title (e.g. Passport updated in ACRA)") }}
+                    </div>
+                    <div class="mb-2">
+                        {{ note_form.content(class="form-control", rows="2", placeholder="Details...") }}
+                    </div>
+                    <div class="d-flex">
+                        {{ note_form.category(class="form-select me-2", style="width: auto;") }}
+                        <button type="submit" class="btn btn-primary">Add Note</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Invoices / Payments Due -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><strong>Invoices / Payment Due Dates</strong> <small class="text-muted">(e.g. Secretarial Fee, Registered Address)</small></span>
+        <a href="{{ url_for('invoice_new', client_id=client.id) }}" class="btn btn-sm btn-success">+ Add Invoice</a>
+    </div>
+    <div class="card-body p-0">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inv in invoices %}
+                <tr class="{{ 'table-danger' if inv.is_overdue else '' }}">
+                    <td><strong>{{ inv.invoice_type }}</strong></td>
+                    <td>{{ inv.description or '-' }}</td>
+                    <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
+                    <td>{{ inv.due_date | format_date }}</td>
+                    <td>
+                        {% if inv.status == 'Paid' %}
+                            <span class="badge bg-success">Paid</span>
+                        {% elif inv.is_overdue %}
+                            <span class="badge bg-danger">Overdue</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Pending ({{ inv.get_days_left() }} days)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('invoice_edit', client_id=client.id, inv_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        {% if inv.status != 'Paid' %}
+                        <form action="{{ url_for('invoice_paid', client_id=client.id, inv_id=inv.id) }}" method="post" class="d-inline">
+                            <button class="btn btn-sm btn-success">Mark Paid</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted">No invoices recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Notes History -->
+<div class="card">
+    <div class="card-header"><strong>Activity & Notes History</strong></div>
+    <div class="card-body">
+        {% if notes %}
+            {% for note in notes %}
+            <div class="border-start border-3 ps-3 mb-3">
+                <div class="d-flex justify-content-between">
+                    <strong>{{ note.title }}</strong>
+                    <small class="text-muted">{{ note.timestamp | format_datetime }}</small>
+                </div>
+                {% if note.content %}
+                    <p class="mb-1">{{ note.content }}</p>
+                {% endif %}
+                <span class="badge bg-secondary">{{ note.category }}</span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted">No notes yet for this client.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

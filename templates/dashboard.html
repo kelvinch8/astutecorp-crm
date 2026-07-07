@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Dashboard</h2>
+    <div>
+        <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-envelope"></i> Email Settings
+        </a>
+        <a href="{{ url_for('clients_list') }}" class="btn btn-primary">
+            <i class="bi bi-people"></i> Manage Clients
+        </a>
+    </div>
+</div>
+
+<div class="alert alert-light border mb-4 small">
+    <i class="bi bi-bell"></i>
+    <strong>Deadline reminders:</strong> The CRM emails you when deadlines are approaching so you can remind clients.
+    Configure your email in <a href="{{ url_for('settings') }}">Settings</a>, set reminder days on each deadline, and use <strong>Send Reminders</strong> in the navbar to check now. Automatic check runs daily at 9:00 AM.
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="card-title">{{ clients_count }}</h3>
+                <p class="card-text text-muted">Total Clients</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-danger">
+            <div class="card-body">
+                <h3 class="card-title text-danger">{{ overdue|length + overdue_invoices|length }}</h3>
+                <p class="card-text text-muted">Overdue Items</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="card-title">{{ upcoming|length }}</h3>
+                <p class="card-text text-muted">Upcoming Deadlines</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="card-title">{{ upcoming_invoices|length }}</h3>
+                <p class="card-text text-muted">Upcoming Invoices</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h4 class="mb-3">Upcoming Deadlines (Next 60 Days)</h4>
+
+{% if upcoming_by_client %}
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Deadlines</th>
+            <th>Next Due</th>
+            <th>Days Left</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for group in upcoming_by_client %}
+        <tr>
+            <td><a href="{{ url_for('client_detail', client_id=group.client.id) }}">{{ group.client.name }}</a></td>
+            <td>
+                {% for dl in group.deadlines %}
+                <div class="{% if not loop.last %}mb-1{% endif %}">
+                    <span class="badge bg-secondary">{{ dl.deadline_type | deadline_label }}</span>
+                    {{ dl.due_date | format_date }}
+                    {% if dl.comments %}
+                    <div class="text-muted small">{{ dl.comments }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </td>
+            <td>{{ group.earliest_due | format_date }}</td>
+            <td>
+                {% if group.soonest_days_left <= 7 %}
+                    <span class="badge bg-warning">{{ group.soonest_days_left }} days</span>
+                {% else %}
+                    {{ group.soonest_days_left }} days
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ url_for('client_detail', client_id=group.client.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">No upcoming deadlines.</div>
+{% endif %}
+
+{% if overdue %}
+<h4 class="mt-4 text-danger">Overdue Deadlines</h4>
+<table class="table table-hover table-danger">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Due Date</th>
+            <th>Overdue By</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for dl in overdue %}
+        <tr>
+            <td><a href="{{ url_for('client_detail', client_id=dl.client.id) }}">{{ dl.client.name }}</a></td>
+            <td>{{ dl.deadline_type | deadline_label }}</td>
+            <td>{{ dl.due_date | format_date }}</td>
+            <td>{{ dl.get_days_left()|abs }} days</td>
+            <td><a href="{{ url_for('client_detail', client_id=dl.client.id) }}" class="btn btn-sm btn-danger">Manage</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<h4 class="mt-4">Upcoming Invoice Payments</h4>
+
+{% if upcoming_invoices %}
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Due Date</th>
+            <th>Days Left</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inv in upcoming_invoices %}
+        <tr>
+            <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}">{{ inv.client.name }}</a></td>
+            <td><span class="badge bg-info text-dark">{{ inv.invoice_type }}</span></td>
+            <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
+            <td>{{ inv.due_date | format_date }}</td>
+            <td>
+                {% if inv.get_days_left() <= 7 %}
+                    <span class="badge bg-warning">{{ inv.get_days_left() }} days</span>
+                {% else %}
+                    {{ inv.get_days_left() }} days
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ url_for('client_detail', client_id=inv.client.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">No upcoming invoice payments.</div>
+{% endif %}
+
+{% if overdue_invoices %}
+<h4 class="mt-4 text-danger">Overdue Invoice Payments</h4>
+<table class="table table-hover table-danger">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Due Date</th>
+            <th>Overdue By</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inv in overdue_invoices %}
+        <tr>
+            <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}">{{ inv.client.name }}</a></td>
+            <td>{{ inv.invoice_type }}</td>
+            <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
+            <td>{{ inv.due_date | format_date }}</td>
+            <td>{{ inv.get_days_left()|abs }} days</td>
+            <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}" class="btn btn-sm btn-danger">Manage</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

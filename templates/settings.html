@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Email Settings{% endblock %}
+
+{% block content %}
+<h3>Email & Deadline Reminders</h3>
+<p class="text-muted">The CRM emails <strong>you</strong> when a client deadline is coming up, so you can follow up and remind the client yourself.</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="alert alert-info">
+            <strong>Zoho setup for kelvin@astutecorp-s.com:</strong>
+            <ul class="mb-2 mt-2">
+                <li>SMTP Server: <code>smtppro.zoho.com</code></li>
+                <li>Port: <code>587</code>, TLS: <code>Yes</code></li>
+                <li>Username: your full email address</li>
+                <li>Password: Zoho password, or an <a href="https://accounts.zoho.com/home#security/security_pwd" target="_blank">App Password</a> if 2FA is on</li>
+            </ul>
+            <strong>Quick setup:</strong>
+            <ol class="mb-0 mt-2">
+                <li>Fill in all fields below, then click <strong>Save Settings</strong> before sending a test.</li>
+                <li>Click <strong>Send Test Email</strong> to confirm it works.</li>
+                <li>When adding deadlines, set <strong>"Email me this many days before"</strong> (e.g. 7 or 14 days).</li>
+                <li>Reminders are sent automatically every day at 9:00 AM, or click <strong>Send Reminders</strong> in the navbar anytime.</li>
+            </ol>
+        </div>
+
+        <form method="post">
+            {{ form.hidden_tag() }}
+
+            <h5 class="mb-3">SMTP Configuration</h5>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.my_email.label(class="form-label") }}
+                    {{ form.my_email(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.smtp_server.label(class="form-label") }}
+                    {{ form.smtp_server(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    {{ form.smtp_port.label(class="form-label") }}
+                    {{ form.smtp_port(class="form-control") }}
+                </div>
+                <div class="col-md-5 mb-3">
+                    {{ form.smtp_username.label(class="form-label") }}
+                    {{ form.smtp_username(class="form-control") }}
+                </div>
+                <div class="col-md-4 mb-3">
+                    {{ form.smtp_password.label(class="form-label") }}
+                    {{ form.smtp_password(class="form-control", placeholder="Zoho password or App Password") }}
+                    <div class="form-text">Required for test emails. Leave blank when saving to keep the current password.</div>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                {{ form.use_tls.label(class="form-label") }}
+                {{ form.use_tls(class="form-select") }}
+            </div>
+
+            <h5 class="mb-3">Your Reminder Email</h5>
+            <p class="text-muted small">
+                This email is sent to <strong>you</strong> when a deadline is approaching. It includes the client name, contact details, and deadline info so you can remind them.
+            </p>
+
+            <div class="mb-3">
+                {{ form.internal_reminder_subject_template.label(class="form-label") }}
+                {{ form.internal_reminder_subject_template(class="form-control") }}
+            </div>
+
+            <div class="mb-3">
+                {{ form.internal_reminder_body_template.label(class="form-label") }}
+                {{ form.internal_reminder_body_template(class="form-control", rows="12", style="font-family: monospace;") }}
+            </div>
+
+            <div class="mb-4">
+                {{ form.email_client.label(class="form-label") }}
+                {{ form.email_client(class="form-select") }}
+            </div>
+
+            <div id="client-template" class="{% if form.email_client.data != 'True' %}d-none{% endif %}">
+                <h5 class="mb-3">Client Email Template (optional)</h5>
+                <p class="text-muted small">Only used if you choose to also email the client automatically.</p>
+
+                <div class="mb-3">
+                    {{ form.reminder_subject_template.label(class="form-label") }}
+                    {{ form.reminder_subject_template(class="form-control") }}
+                </div>
+
+                <div class="mb-3">
+                    {{ form.reminder_body_template.label(class="form-label") }}
+                    {{ form.reminder_body_template(class="form-control", rows="10", style="font-family: monospace;") }}
+                </div>
+            </div>
+
+            <div class="card bg-light mb-4">
+                <div class="card-body py-3">
+                    <h6 class="card-title mb-2">Available placeholders</h6>
+                    <div class="row small">
+                        {% for token, description in placeholders %}
+                        <div class="col-md-6 mb-1">
+                            <code>{{ token }}</code> — {{ description }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+        </form>
+
+        <form method="post" action="{{ url_for('test_email') }}" class="d-inline ms-2">
+            <button type="submit" class="btn btn-outline-secondary">Send Test Email</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const emailClientSelect = document.getElementById('email_client');
+    const clientTemplate = document.getElementById('client-template');
+    if (emailClientSelect && clientTemplate) {
+        emailClientSelect.addEventListener('change', () => {
+            clientTemplate.classList.toggle('d-none', emailClientSelect.value !== 'True');
+        });
+    }
+</script>
+{% endblock %}

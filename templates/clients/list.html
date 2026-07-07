@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}{% if show_archived %}Archived Clients{% else %}Clients{% endif %}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>{% if show_archived %}Archived Clients{% else %}Active Clients{% endif %}</h3>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('clients_export') }}" class="btn btn-outline-primary">
+            <i class="bi bi-file-earmark-excel"></i> Export to Excel
+        </a>
+        {% if not show_archived %}
+        <a href="{{ url_for('client_new') }}" class="btn btn-success">
+            <i class="bi bi-person-plus"></i> Add New Client
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" action="{{ url_for('clients_list') }}" class="row g-2 align-items-center">
+            {% if show_archived %}
+            <input type="hidden" name="view" value="archived">
+            {% endif %}
+            <div class="col-md-8">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" name="q" class="form-control" placeholder="Search by name, UEN, contact, email, or phone..."
+                           value="{{ search }}" autofocus>
+                </div>
+            </div>
+            <div class="col-md-4 d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Search</button>
+                {% if search %}
+                <a href="{{ url_for('clients_list', view='archived' if show_archived else None) }}" class="btn btn-outline-secondary">Clear</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if not show_archived else '' }}"
+           href="{{ url_for('clients_list', q=search or None) }}">
+            Active Clients
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if show_archived else '' }}"
+           href="{{ url_for('clients_list', view='archived', q=search or None) }}">
+            Archived
+        </a>
+    </li>
+</ul>
+
+{% if search %}
+<p class="text-muted small mb-2">{{ clients|length }} result{{ 's' if clients|length != 1 else '' }} for "{{ search }}"</p>
+{% endif %}
+
+<table class="table table-striped" id="clientsTable">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>UEN</th>
+            <th>Contact</th>
+            <th>FYE Month</th>
+            <th>Pending Deadlines</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for client in clients %}
+        <tr>
+            <td><a href="{{ url_for('client_detail', client_id=client.id) }}">{{ client.name }}</a></td>
+            <td><code>{{ client.uen }}</code></td>
+            <td>{{ client.contact_person or '-' }}<br><small>{{ client.email or '' }}</small></td>
+            <td>{{ client.fye_month | month_name }}</td>
+            <td>
+                {% set pending = client.deadlines | selectattr('status', 'eq', 'Pending') | list | length %}
+                <span class="badge bg-{{ 'danger' if pending > 0 else 'success' }}">{{ pending }}</span>
+            </td>
+            <td class="text-nowrap">
+                <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                {% if show_archived %}
+                <form action="{{ url_for('client_unarchive', client_id=client.id) }}" method="post" class="d-inline">
+                    <button type="submit" class="btn btn-sm btn-outline-success">Restore</button>
+                </form>
+                {% else %}
+                <form action="{{ url_for('client_archive', client_id=client.id) }}" method="post" class="d-inline"
+                      onsubmit="return confirm('Archive {{ client.name }}? They will be hidden from the active list and dashboard.');">
+                    <button type="submit" class="btn btn-sm btn-outline-warning">Archive</button>
+                </form>
+                {% endif %}
+                <form action="{{ url_for('client_delete', client_id=client.id) }}" method="post" class="d-inline"
+                      onsubmit="return confirm('Delete {{ client.name }}? This will permanently remove all deadlines, invoices, and notes for this client.');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" class="text-center text-muted">
+                {% if search %}
+                    No clients match your search.
+                {% elif show_archived %}
+                    No archived clients.
+                {% else %}
+                    No active clients yet.
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const searchInput = document.querySelector('input[name="q"]');
+    const rows = document.querySelectorAll('#clientsTable tbody tr');
+    if (!searchInput || !rows.length) return;
+
+    searchInput.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+        let visible = 0;
+        rows.forEach(function (row) {
+            if (row.querySelector('td[colspan]')) return;
+            const matches = !query || row.textContent.toLowerCase().includes(query);
+            row.style.display = matches ? '' : 'none';
+            if (matches) visible++;
+        });
+    });
+});
+</script>
+{% endblock %}

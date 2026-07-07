@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h3>{{ title }} for {{ client.name }}</h3>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post">
+            {{ form.hidden_tag() }}
+            
+            <div class="mb-3">
+                {{ form.deadline_type.label(class="form-label") }}
+                {{ form.deadline_type(class="form-select") }}
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.due_date.label(class="form-label") }}
+                    {{ form.due_date(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.reminder_days.label(class="form-label") }}
+                    {{ form.reminder_days(class="form-control") }}
+                    <div class="form-text">You'll receive an email when the deadline is this many days away or fewer.</div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.comments.label(class="form-label") }}
+                {{ form.comments(class="form-control", rows="2", placeholder="e.g. Waiting for client to confirm AGM date") }}
+            </div>
+            
+            <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+            <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.2.1
+WTForms==3.1.2
+Werkzeug==3.0.3
+Flask-Login==0.6.3
+python-dateutil==2.9.0
+apscheduler==3.10.4
+email-validator==2.1.1
+openpyxl==3.1.5
+gunicorn==22.0.0
