@@ -19,6 +19,9 @@
         </p>
     </div>
     <div class="page-actions">
+        <a href="{{ url_for('client_send_reminder', client_id=client.id) }}" class="btn btn-warning btn-sm">
+            <i class="bi bi-envelope"></i> Send email reminder
+        </a>
         <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn btn-outline-secondary btn-sm">Edit</a>
         {% if client.archived %}
         <form action="{{ url_for('client_unarchive', client_id=client.id) }}" method="post" class="d-inline">

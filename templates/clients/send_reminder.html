@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Send reminder — {{ client.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header mb-3">
+    <div>
+        <h3 class="mb-1">Send email reminder</h3>
+        <p class="text-muted mb-0 small">
+            Only for <strong>{{ client.name }}</strong>
+            {% if client.email %}
+            · Client email: <code>{{ client.email }}</code>
+            {% else %}
+            · <span class="text-danger">No client email on file</span> (add under Edit Client, or send to yourself only)
+            {% endif %}
+        </p>
+    </div>
+    <div class="page-actions">
+        <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-outline-secondary btn-sm">Back to client</a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header"><strong>Compose message</strong></div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Edit the subject and message below, then choose who receives it.
+                    This does <strong>not</strong> email other clients — only this one.
+                    Navbar <strong>Send Reminders</strong> still runs the bulk check for all clients.
+                </p>
+                <form method="post">
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.subject.label(class="form-label") }}
+                        {{ form.subject(class="form-control") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.body.label(class="form-label") }}
+                        {{ form.body(class="form-control", rows="14") }}
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.send_to_client.label(class="form-label") }}
+                            {{ form.send_to_client(class="form-select") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.send_to_me.label(class="form-label") }}
+                            {{ form.send_to_me(class="form-select") }}
+                            <div class="form-text">Copy to your address in Settings (deadline inbox).</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-envelope"></i> {{ form.submit.label.text }}
+                    </button>
+                    <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-outline-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header"><strong>Outstanding deadlines for this client</strong></div>
+            <div class="card-body">
+                {% if deadlines %}
+                <ul class="list-unstyled mb-0">
+                    {% for dl in deadlines %}
+                    <li class="mb-2">
+                        <span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span>
+                        <div class="small mt-1">
+                            Due {{ dl.due_date | format_date }}
+                            ·
+                            {% if dl.get_days_left() < 0 %}
+                            <span class="text-danger">{{ dl.get_days_left()|abs }} days overdue</span>
+                            {% elif dl.get_days_left() == 0 %}
+                            <span class="text-danger">Due today</span>
+                            {% else %}
+                            {{ dl.get_days_left() }} days left
+                            {% endif %}
+                        </div>
+                        {% if dl.comments %}
+                        <div class="text-muted small">{{ dl.comments }}</div>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted mb-0">No pending/overdue deadlines. You can still send a custom follow-up email.</p>
+                {% endif %}
+            </div>
+        </div>
+        <div class="alert alert-light border small">
+            Default text is filled from <strong>Settings → Client Email Template</strong> when there is one deadline,
+            or a multi-deadline summary when there are several. Edit freely before sending.
+        </div>
+    </div>
+</div>
+{% endblock %}

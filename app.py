@@ -379,6 +379,21 @@ class AdminSetPasswordForm(FlaskForm):
     )
     submit = SubmitField('Set Password')
 
+class ClientReminderForm(FlaskForm):
+    subject = StringField('Email subject', validators=[DataRequired(), Length(max=300)])
+    body = TextAreaField('Email message', validators=[DataRequired(), Length(max=10000)])
+    send_to_me = SelectField(
+        'Email me a copy',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    send_to_client = SelectField(
+        'Email the client',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    submit = SubmitField('Send reminder email')
+
 # ==================== HELPER FUNCTIONS ====================
 
 PASSWORD_RESET_SALT = 'astutecorp-crm-password-reset'
@@ -519,6 +534,67 @@ def get_client_reminder_templates(settings):
     subject = (settings.reminder_subject_template or '').strip() or DEFAULT_REMINDER_SUBJECT
     body = (settings.reminder_body_template or '').strip() or DEFAULT_REMINDER_BODY
     return subject, body
+
+
+def get_client_open_deadlines(client_id):
+    """Pending or overdue deadlines for one client (not completed)."""
+    return (
+        Deadline.query.filter(
+            Deadline.client_id == client_id,
+            Deadline.status.in_(['Pending', 'Overdue']),
+        )
+        .order_by(Deadline.due_date.asc())
+        .all()
+    )
+
+
+def format_deadline_summary_lines(deadlines):
+    lines = []
+    for dl in deadlines:
+        label = DEADLINE_TYPE_LABELS.get(dl.deadline_type, dl.deadline_type)
+        days_left = dl.get_days_left()
+        if days_left < 0:
+            timing = f'{abs(days_left)} day(s) overdue'
+        elif days_left == 0:
+            timing = 'due today'
+        else:
+            timing = f'{days_left} day(s) remaining'
+        line = f'- {label}: due {format_date_display(dl.due_date)} ({timing})'
+        if dl.comments:
+            line += f' — {dl.comments.strip()}'
+        lines.append(line)
+    return '\n'.join(lines)
+
+
+def build_client_reminder_defaults(client, deadlines, settings):
+    """Pre-fill subject/body for a one-client reminder (editable before send)."""
+    settings = settings or Setting.query.first()
+    subject_tpl, body_tpl = get_client_reminder_templates(settings)
+    summary = format_deadline_summary_lines(deadlines)
+    if deadlines:
+        primary = deadlines[0]
+        values = build_deadline_template_values(primary)
+        subject = render_reminder_template(subject_tpl, **values)
+        if len(deadlines) > 1:
+            subject = f'Deadline reminder: {client.name} ({len(deadlines)} outstanding items)'
+        body = render_reminder_template(body_tpl, **values)
+        if len(deadlines) > 1:
+            body = (
+                f'Dear {client.contact_person or "Client"},\n\n'
+                f'This is a reminder for {client.name} (UEN: {client.uen or "-"}).\n\n'
+                f'Outstanding deadlines:\n{summary}\n\n'
+                f'Please ensure these are actioned on time.\n\n'
+                f'Best regards,\nCorporate Service Provider'
+            )
+    else:
+        subject = f'Reminder: {client.name}'
+        body = (
+            f'Dear {client.contact_person or "Client"},\n\n'
+            f'This is a follow-up regarding {client.name} (UEN: {client.uen or "-"}).\n\n'
+            f'Best regards,\nCorporate Service Provider'
+        )
+    return subject, body, summary
+
 
 def build_deadline_template_values(deadline):
     client = deadline.client
@@ -1046,6 +1122,77 @@ def client_edit(client_id):
         flash('Client updated.', 'success')
         return redirect(url_for('client_detail', client_id=client.id))
     return render_template('clients/form.html', form=form, title='Edit Client')
+
+@app.route('/clients/<int:client_id>/send-reminder', methods=['GET', 'POST'])
+@login_required
+def client_send_reminder(client_id):
+    """Compose and send a reminder email for this client only (not all clients)."""
+    client = Client.query.get_or_404(client_id)
+    settings = Setting.query.first()
+    deadlines = get_client_open_deadlines(client_id)
+    form = ClientReminderForm()
+
+    if request.method == 'GET':
+        subject, body, _summary = build_client_reminder_defaults(client, deadlines, settings)
+        form.subject.data = subject
+        form.body.data = body
+        # Default: email client if they have an address; always offer copy to you
+        form.send_to_client.data = 'True' if client.email else 'False'
+        form.send_to_me.data = 'True'
+
+    if form.validate_on_submit():
+        to_me = form.send_to_me.data == 'True'
+        to_client = form.send_to_client.data == 'True'
+        if not to_me and not to_client:
+            flash('Choose at least one recipient: you and/or the client.', 'warning')
+            return render_template(
+                'clients/send_reminder.html',
+                form=form,
+                client=client,
+                deadlines=deadlines,
+            )
+        if not settings or not settings.my_email:
+            flash('Configure Your Email and SMTP in Settings before sending.', 'danger')
+            return redirect(url_for('settings'))
+
+        subject = form.subject.data.strip()
+        body = form.body.data.strip()
+        sent = []
+        failed = []
+
+        if to_me:
+            if send_email(settings.my_email, f'[AstuteCorp CRM] {subject}', body):
+                sent.append(f'you ({settings.my_email})')
+            else:
+                failed.append(f'you ({_last_email_error or "error"})')
+
+        if to_client:
+            if not client.email:
+                failed.append('client (no email on file)')
+            elif send_email(client.email, subject, body):
+                sent.append(f'client ({client.email})')
+            else:
+                failed.append(f'client ({_last_email_error or "error"})')
+
+        # Mark open deadlines as reminded today if at least one email went out
+        if sent:
+            today = date.today()
+            for dl in deadlines:
+                dl.last_reminded = today
+            db.session.commit()
+            flash(f'Reminder sent to: {", ".join(sent)}.', 'success')
+        if failed:
+            flash(f'Could not send to: {", ".join(failed)}.', 'danger')
+        if sent:
+            return redirect(url_for('client_detail', client_id=client_id))
+
+    return render_template(
+        'clients/send_reminder.html',
+        form=form,
+        client=client,
+        deadlines=deadlines,
+    )
+
 
 @app.route('/clients/<int:client_id>/delete', methods=['POST'])
 @login_required
