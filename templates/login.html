@@ -26,13 +26,15 @@
                             </button>
                         </div>
                     </div>
-                    <div class="d-grid">
+                    <div class="d-grid gap-2">
                         {{ form.submit(class="btn btn-primary btn-lg") }}
+                        <a href="{{ url_for('forgot_password') }}" class="btn btn-link btn-sm">Forgot password?</a>
                     </div>
                 </form>
             </div>
             <div class="card-footer text-muted small">
                 First-time setup? Change your password after logging in, then use <strong>Users</strong> to add team members.
+                Forgot password needs email/SMTP configured in Settings.
             </div>
         </div>
     </div>

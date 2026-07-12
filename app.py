@@ -21,6 +21,7 @@ import sqlite3 as sqlite3_stdlib
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'corp-crm-super-secret-key-change-me')
@@ -58,12 +59,8 @@ else:
     app.config['UPLOAD_FOLDER'] = os.path.join(app.instance_path, 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Temporary one-time restore token (remove after production DB sync)
-# Also accepted via env RESTORE_TOKEN if set on the host.
-_ONE_TIME_RESTORE_TOKEN = os.environ.get(
-    'RESTORE_TOKEN',
-    'e63b46e4e0c0a082477bd42a6923e3b9b74f73de53cd5470',
-)
+# Optional emergency restore token (set RESTORE_TOKEN in host env to enable)
+_ONE_TIME_RESTORE_TOKEN = os.environ.get('RESTORE_TOKEN', '')
 
 ALLOWED_NOTE_EXTENSIONS = {
     'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp',
@@ -362,7 +359,48 @@ class ChangePasswordForm(FlaskForm):
     )
     submit = SubmitField('Change Password')
 
+class ForgotPasswordForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    submit = SubmitField('Send Reset Link')
+
+class ResetPasswordForm(FlaskForm):
+    new_password = PasswordField('New Password', validators=[DataRequired(), Length(min=6)])
+    confirm_password = PasswordField(
+        'Confirm New Password',
+        validators=[DataRequired(), EqualTo('new_password', message='Passwords must match.')]
+    )
+    submit = SubmitField('Set New Password')
+
+class AdminSetPasswordForm(FlaskForm):
+    new_password = PasswordField('New Password', validators=[DataRequired(), Length(min=6)])
+    confirm_password = PasswordField(
+        'Confirm New Password',
+        validators=[DataRequired(), EqualTo('new_password', message='Passwords must match.')]
+    )
+    submit = SubmitField('Set Password')
+
 # ==================== HELPER FUNCTIONS ====================
+
+PASSWORD_RESET_SALT = 'astutecorp-crm-password-reset'
+PASSWORD_RESET_MAX_AGE = 3600  # 1 hour
+
+
+def _password_reset_serializer():
+    return URLSafeTimedSerializer(app.config['SECRET_KEY'], salt=PASSWORD_RESET_SALT)
+
+
+def generate_password_reset_token(user_id):
+    return _password_reset_serializer().dumps({'user_id': user_id})
+
+
+def verify_password_reset_token(token, max_age=PASSWORD_RESET_MAX_AGE):
+    try:
+        data = _password_reset_serializer().loads(token, max_age=max_age)
+        return data.get('user_id')
+    except SignatureExpired:
+        return None
+    except BadSignature:
+        return None
 
 DEADLINE_TYPES = ['FinancialYearEnd', 'ECI', 'AGM', 'AnnualReturn', 'TaxFiling']
 
@@ -1460,6 +1498,70 @@ def login():
             flash('Invalid username or password.', 'danger')
     return render_template('login.html', form=form)
 
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    form = ForgotPasswordForm()
+    if form.validate_on_submit():
+        username = (form.username.data or '').strip()
+        user = User.query.filter_by(username=username).first()
+        settings = Setting.query.first()
+        # Always show the same message (do not reveal whether username exists)
+        generic_msg = (
+            'If that username exists and email is configured, a reset link has been sent '
+            'to the CRM notification email in Settings. Check that inbox (and spam).'
+        )
+        if not user:
+            flash(generic_msg, 'info')
+            return redirect(url_for('login'))
+        if not settings or not settings.my_email:
+            flash(
+                'Password reset email cannot be sent: configure Your Email and SMTP in Settings first '
+                '(ask a logged-in teammate, or restore access via database backup).',
+                'danger',
+            )
+            return redirect(url_for('login'))
+        token = generate_password_reset_token(user.id)
+        reset_url = url_for('reset_password', token=token, _external=True)
+        subject = '[AstuteCorp CRM] Password reset'
+        body = (
+            f'A password reset was requested for username: {user.username}\n\n'
+            f'Open this link within 1 hour to set a new password:\n{reset_url}\n\n'
+            f'If you did not request this, ignore this email.\n\n'
+            f'— AstuteCorp CRM'
+        )
+        if send_email(settings.my_email, subject, body):
+            flash(generic_msg, 'info')
+        else:
+            err = _last_email_error or 'Unknown email error'
+            flash(f'Could not send reset email: {err}', 'danger')
+        return redirect(url_for('login'))
+    return render_template('forgot_password.html', form=form)
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    user_id = verify_password_reset_token(token)
+    if not user_id:
+        flash('This reset link is invalid or has expired. Please request a new one.', 'danger')
+        return redirect(url_for('forgot_password'))
+    user = User.query.get(user_id)
+    if not user:
+        flash('User account not found.', 'danger')
+        return redirect(url_for('login'))
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        user.set_password(form.new_password.data)
+        db.session.commit()
+        flash('Password updated. You can log in with your new password.', 'success')
+        return redirect(url_for('login'))
+    return render_template('reset_password.html', form=form, username=user.username)
+
+
 @app.route('/logout')
 @login_required
 def logout():
@@ -1482,6 +1584,20 @@ def users():
             flash(f'User "{form.username.data}" created.', 'success')
             return redirect(url_for('users'))
     return render_template('users.html', users=User.query.order_by(User.username).all(), form=form)
+
+
+@app.route('/users/<int:user_id>/set-password', methods=['GET', 'POST'])
+@login_required
+def set_user_password(user_id):
+    """Set a user's password without knowing the old one (for admins / recovery)."""
+    user = User.query.get_or_404(user_id)
+    form = AdminSetPasswordForm()
+    if form.validate_on_submit():
+        user.set_password(form.new_password.data)
+        db.session.commit()
+        flash(f'Password updated for "{user.username}".', 'success')
+        return redirect(url_for('users'))
+    return render_template('set_user_password.html', form=form, user=user)
 
 @app.route('/users/<int:user_id>/delete', methods=['POST'])
 @login_required
