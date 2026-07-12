@@ -93,6 +93,9 @@ class Client(db.Model):
     incorporation_date = db.Column(db.Date)
     archived = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Last composed per-client reminder email (reused next time)
+    saved_reminder_subject = db.Column(db.Text)
+    saved_reminder_body = db.Column(db.Text)
 
     deadlines = db.relationship('Deadline', backref='client', lazy=True, cascade="all, delete-orphan")
     invoices = db.relationship('Invoice', backref='client', lazy=True, cascade="all, delete-orphan")
@@ -1133,10 +1136,14 @@ def client_send_reminder(client_id):
     form = ClientReminderForm()
 
     if request.method == 'GET':
-        subject, body, _summary = build_client_reminder_defaults(client, deadlines, settings)
-        form.subject.data = subject
-        form.body.data = body
-        # Default: email client if they have an address; always offer copy to you
+        # Reuse last saved message for this client if available
+        if (client.saved_reminder_subject or '').strip() and (client.saved_reminder_body or '').strip():
+            form.subject.data = client.saved_reminder_subject
+            form.body.data = client.saved_reminder_body
+        else:
+            subject, body, _summary = build_client_reminder_defaults(client, deadlines, settings)
+            form.subject.data = subject
+            form.body.data = body
         form.send_to_client.data = 'True' if client.email else 'False'
         form.send_to_me.data = 'True'
 
@@ -1157,6 +1164,12 @@ def client_send_reminder(client_id):
 
         subject = form.subject.data.strip()
         body = form.body.data.strip()
+
+        # Always keep this client's composed message for next time
+        client.saved_reminder_subject = subject
+        client.saved_reminder_body = body
+        db.session.commit()
+
         sent = []
         failed = []
 
@@ -1174,13 +1187,31 @@ def client_send_reminder(client_id):
             else:
                 failed.append(f'client ({_last_email_error or "error"})')
 
-        # Mark open deadlines as reminded today if at least one email went out
         if sent:
             today = date.today()
             for dl in deadlines:
                 dl.last_reminded = today
+
+            recipients_note = ', '.join(sent)
+            note_title = f'Email reminder sent: {subject[:120]}'
+            if len(subject) > 120:
+                note_title = note_title[:117] + '...'
+            note_content = (
+                f'To: {recipients_note}\n'
+                f'Subject: {subject}\n\n'
+                f'{body}'
+            )
+            db.session.add(Note(
+                client_id=client.id,
+                title=note_title,
+                content=note_content,
+                category='Client',
+            ))
             db.session.commit()
-            flash(f'Reminder sent to: {", ".join(sent)}.', 'success')
+            flash(
+                f'Reminder sent to: {recipients_note}. Message saved for this client and logged in Activity & Notes.',
+                'success',
+            )
         if failed:
             flash(f'Could not send to: {", ".join(failed)}.', 'danger')
         if sent:
@@ -1191,6 +1222,10 @@ def client_send_reminder(client_id):
         form=form,
         client=client,
         deadlines=deadlines,
+        has_saved_message=bool(
+            (client.saved_reminder_subject or '').strip()
+            and (client.saved_reminder_body or '').strip()
+        ),
     )
 
 
@@ -1795,6 +1830,8 @@ def migrate_database():
         },
         'client': {
             'archived': 'BOOLEAN DEFAULT 0',
+            'saved_reminder_subject': 'TEXT',
+            'saved_reminder_body': 'TEXT',
         },
     }
     with db.engine.begin() as conn:

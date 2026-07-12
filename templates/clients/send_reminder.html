@@ -28,8 +28,15 @@
                 <p class="text-muted small">
                     Edit the subject and message below, then choose who receives it.
                     This does <strong>not</strong> email other clients — only this one.
+                    Your message is <strong>saved for this client</strong> after send so you can reuse it next time,
+                    and a copy is logged under <strong>Activity &amp; Notes History</strong>.
                     Navbar <strong>Send Reminders</strong> still runs the bulk check for all clients.
                 </p>
+                {% if has_saved_message %}
+                <div class="alert alert-info py-2 small mb-3">
+                    Showing the last message saved for this client. Edit if needed, then send again.
+                </div>
+                {% endif %}
                 <form method="post">
                     {{ form.hidden_tag() }}
                     <div class="mb-3">
