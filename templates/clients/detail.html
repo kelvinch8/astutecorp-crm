@@ -201,15 +201,18 @@
         {% if notes %}
             {% for note in notes %}
             <div class="border-start border-3 ps-3 mb-3">
-                <div class="d-flex justify-content-between flex-wrap gap-1">
+                <div class="d-flex justify-content-between flex-wrap gap-1 align-items-start">
                     <strong>{{ note.title }}</strong>
-                    <small class="text-muted">{{ note.timestamp | format_datetime }}</small>
+                    <small class="text-muted text-nowrap ms-2">{{ note.timestamp | format_datetime }}</small>
                 </div>
-                {% if note.content %}
+                {# Email reminders: title + date only (no full message body) #}
+                {% if note.content and not note.title.startswith('Email reminder sent:') %}
                     <p class="mb-1">{{ note.content }}</p>
                 {% endif %}
-                <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-1 mt-1">
+                    {% if not note.title.startswith('Email reminder sent:') %}
                     <span class="badge bg-secondary">{{ note.category }}</span>
+                    {% endif %}
                     {% if note.attachments %}
                         {% for att in note.attachments %}
                         <a class="small text-decoration-none"

@@ -1192,19 +1192,14 @@ def client_send_reminder(client_id):
             for dl in deadlines:
                 dl.last_reminded = today
 
-            recipients_note = ', '.join(sent)
-            note_title = f'Email reminder sent: {subject[:120]}'
-            if len(subject) > 120:
-                note_title = note_title[:117] + '...'
-            note_content = (
-                f'To: {recipients_note}\n'
-                f'Subject: {subject}\n\n'
-                f'{body}'
-            )
+            # Title + timestamp only in Activity history (no full email body)
+            note_title = f'Email reminder sent: {subject[:160]}'
+            if len(subject) > 160:
+                note_title = f'Email reminder sent: {subject[:157]}...'
             db.session.add(Note(
                 client_id=client.id,
                 title=note_title,
-                content=note_content,
+                content='',  # keep Activity list clean; full text stays in saved draft
                 category='Client',
             ))
             db.session.commit()
