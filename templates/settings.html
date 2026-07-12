@@ -118,6 +118,27 @@
         </form>
     </div>
 </div>
+
+<div class="card mb-4">
+    <div class="card-header"><strong>Database backup / restore</strong></div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Download a full copy of this server’s database, or replace it with a
+            <code>.db</code> file from your Mac so Render matches your local data.
+            This overwrites all clients, deadlines, invoices, notes, and users on this server.
+        </p>
+        <a href="{{ url_for('export_database') }}" class="btn btn-outline-primary me-2">
+            <i class="bi bi-download"></i> Download database
+        </a>
+        <form method="post" action="{{ url_for('import_database') }}" enctype="multipart/form-data" class="d-inline-block mt-2 mt-md-0"
+              onsubmit="return confirm('Replace ALL data on this server with the uploaded database? This cannot be undone easily.');">
+            <div class="input-group">
+                <input type="file" name="database" class="form-control" accept=".db,application/octet-stream" required>
+                <button type="submit" class="btn btn-outline-danger">Upload &amp; replace</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

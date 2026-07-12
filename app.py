@@ -16,6 +16,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import uuid
+import shutil
+import sqlite3 as sqlite3_stdlib
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -27,8 +29,34 @@ _default_db = 'sqlite:///' + os.path.join(app.instance_path, 'corp_crm.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', _default_db)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB total per request
-app.config['UPLOAD_FOLDER'] = os.path.join(app.instance_path, 'uploads')
+
+def get_sqlite_filesystem_path():
+    """Return the on-disk path for the configured SQLite database, if any."""
+    uri = app.config.get('SQLALCHEMY_DATABASE_URI') or ''
+    if not uri.startswith('sqlite:///'):
+        return None
+    path = uri[len('sqlite:///'):]
+    if path.startswith('/') and not path.startswith('//'):
+        # sqlite:////abs/path → /abs/path after stripping sqlite:///
+        return path
+    if not os.path.isabs(path):
+        path = os.path.join(app.root_path, path)
+    return path
+
+# Keep uploads on the same persistent volume as the DB when on Render (/var/data)
+_db_path = get_sqlite_filesystem_path()
+if _db_path and _db_path.startswith('/var/data'):
+    app.config['UPLOAD_FOLDER'] = '/var/data/uploads'
+else:
+    app.config['UPLOAD_FOLDER'] = os.path.join(app.instance_path, 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Temporary one-time restore token (remove after production DB sync)
+# Also accepted via env RESTORE_TOKEN if set on the host.
+_ONE_TIME_RESTORE_TOKEN = os.environ.get(
+    'RESTORE_TOKEN',
+    'e63b46e4e0c0a082477bd42a6923e3b9b74f73de53cd5470',
+)
 
 ALLOWED_NOTE_EXTENSIONS = {
     'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp',
@@ -1271,6 +1299,131 @@ def test_email():
     success, message = send_test_reminder_email()
     flash(message, 'success' if success else 'danger')
     return redirect(url_for('settings'))
+
+
+def _validate_sqlite_upload(file_storage):
+    """Save upload to a temp path and verify it is a readable CRM SQLite DB."""
+    if not file_storage or not file_storage.filename:
+        return None, 'No database file uploaded.'
+    tmp_path = os.path.join(app.instance_path, f'restore-{uuid.uuid4().hex}.db')
+    file_storage.save(tmp_path)
+    try:
+        conn = sqlite3_stdlib.connect(tmp_path)
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            required = {'client', 'deadline', 'user'}
+            if not required.issubset(tables):
+                return None, 'File is not a valid AstuteCorp CRM database (missing tables).'
+            client_count = conn.execute('SELECT COUNT(*) FROM client').fetchone()[0]
+        finally:
+            conn.close()
+    except Exception as exc:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        return None, f'Invalid SQLite file: {exc}'
+    return tmp_path, f'OK ({client_count} clients)'
+
+
+def replace_sqlite_database(source_path):
+    """Replace the live SQLite file with source_path. Returns (ok, message)."""
+    dest = get_sqlite_filesystem_path()
+    if not dest:
+        return False, 'Database path is not SQLite; cannot import.'
+    os.makedirs(os.path.dirname(dest) or '.', exist_ok=True)
+    # Drop active connections before swapping the file
+    db.session.remove()
+    db.engine.dispose()
+    if os.path.isfile(dest):
+        backup = dest + f'.bak-{datetime.utcnow().strftime("%Y%m%d%H%M%S")}'
+        shutil.copy2(dest, backup)
+    shutil.copy2(source_path, dest)
+    # Re-bind and ensure schema
+    db.engine.dispose()
+    with app.app_context():
+        db.create_all()
+        migrate_database()
+    return True, dest
+
+
+@app.route('/settings/export-database')
+@login_required
+def export_database():
+    path = get_sqlite_filesystem_path()
+    if not path or not os.path.isfile(path):
+        flash('Database file not found on this server.', 'danger')
+        return redirect(url_for('settings'))
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=f'corp_crm-backup-{date.today().isoformat()}.db',
+    )
+
+
+@app.route('/settings/import-database', methods=['POST'])
+@login_required
+def import_database():
+    tmp_path, msg = _validate_sqlite_upload(request.files.get('database'))
+    if not tmp_path:
+        flash(msg, 'danger')
+        return redirect(url_for('settings'))
+    try:
+        ok, result = replace_sqlite_database(tmp_path)
+        if not ok:
+            flash(result, 'danger')
+        else:
+            flash(
+                f'Database imported successfully ({msg}). '
+                'If anything looks stale, restart the service on Render.',
+                'success',
+            )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    return redirect(url_for('settings'))
+
+
+@app.route('/internal/restore-database', methods=['POST'])
+def internal_restore_database():
+    """One-time / emergency DB restore via token (no login). Disable after use."""
+    token = request.headers.get('X-Restore-Token') or request.form.get('token') or ''
+    if not _ONE_TIME_RESTORE_TOKEN or token != _ONE_TIME_RESTORE_TOKEN:
+        abort(403)
+    tmp_path, msg = _validate_sqlite_upload(request.files.get('database'))
+    if not tmp_path:
+        return {'ok': False, 'error': msg}, 400
+    try:
+        ok, result = replace_sqlite_database(tmp_path)
+        if not ok:
+            return {'ok': False, 'error': result}, 500
+        # Report counts from new DB
+        conn = sqlite3_stdlib.connect(result)
+        try:
+            clients = conn.execute('SELECT COUNT(*) FROM client').fetchone()[0]
+            deadlines = conn.execute('SELECT COUNT(*) FROM deadline').fetchone()[0]
+        finally:
+            conn.close()
+        return {
+            'ok': True,
+            'path': result,
+            'clients': clients,
+            'deadlines': deadlines,
+            'message': msg,
+        }
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
