@@ -3,11 +3,11 @@
 {% block title %}Login{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-4">
-        <div class="card shadow">
+<div class="row justify-content-center mt-3 mt-md-5">
+    <div class="col-12 col-sm-10 col-md-6 col-lg-4">
+        <div class="card shadow login-card">
             <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">AstuteCorp CRM Login</h4>
+                <h4 class="mb-0 fs-5">AstuteCorp CRM Login</h4>
             </div>
             <div class="card-body">
                 <p class="text-muted">Please log in to access the system.</p>
@@ -15,11 +15,16 @@
                     {{ form.hidden_tag() }}
                     <div class="mb-3">
                         {{ form.username.label(class="form-label") }}
-                        {{ form.username(class="form-control", placeholder="admin") }}
+                        {{ form.username(class="form-control") }}
                     </div>
                     <div class="mb-3">
                         {{ form.password.label(class="form-label") }}
-                        {{ form.password(class="form-control", placeholder="admin123") }}
+                        <div class="input-group password-toggle-group">
+                            {{ form.password(class="form-control", type="password", autocomplete="current-password") }}
+                            <button type="button" class="btn btn-password-toggle" title="Show password" aria-label="Show password">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="d-grid">
                         {{ form.submit(class="btn btn-primary btn-lg") }}
@@ -27,7 +32,7 @@
                 </form>
             </div>
             <div class="card-footer text-muted small">
-                First-time setup? Log in as <strong>admin</strong>, change your password, then use <strong>Users</strong> to add team members.
+                First-time setup? Change your password after logging in, then use <strong>Users</strong> to add team members.
             </div>
         </div>
     </div>

@@ -3,11 +3,11 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Dashboard</h2>
-    <div>
-        <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary me-2">
-            <i class="bi bi-envelope"></i> Email Settings
+<div class="page-header mb-4">
+    <h2 class="mb-0">Dashboard</h2>
+    <div class="page-actions">
+        <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-envelope"></i> <span class="d-none d-sm-inline">Email </span>Settings
         </a>
         <a href="{{ url_for('clients_list') }}" class="btn btn-primary">
             <i class="bi bi-people"></i> Manage Clients
@@ -17,37 +17,37 @@
 
 <div class="alert alert-light border mb-4 small">
     <i class="bi bi-bell"></i>
-    <strong>Deadline reminders:</strong> The CRM emails you when deadlines are approaching so you can remind clients.
-    Configure your email in <a href="{{ url_for('settings') }}">Settings</a>, set reminder days on each deadline, and use <strong>Send Reminders</strong> in the navbar to check now. Automatic check runs daily at 9:00 AM.
+    <strong>Deadline reminders:</strong> The CRM emails you when deadlines are approaching, due today, or overdue so you can follow up with clients.
+    Configure your email in <a href="{{ url_for('settings') }}">Settings</a>, set reminder days on each deadline, and use <strong>Send Reminders</strong> in the navbar to check now. Automatic check runs daily at 9:00 AM (SGT).
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card text-center">
+<div class="row g-2 g-md-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card text-center stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title">{{ clients_count }}</h3>
                 <p class="card-text text-muted">Total Clients</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center border-danger">
+    <div class="col-6 col-md-3">
+        <div class="card text-center border-danger stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title text-danger">{{ overdue|length + overdue_invoices|length }}</h3>
                 <p class="card-text text-muted">Overdue Items</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center">
+    <div class="col-6 col-md-3">
+        <div class="card text-center stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title">{{ upcoming|length }}</h3>
                 <p class="card-text text-muted">Upcoming Deadlines</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center">
+    <div class="col-6 col-md-3">
+        <div class="card text-center stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title">{{ upcoming_invoices|length }}</h3>
                 <p class="card-text text-muted">Upcoming Invoices</p>
@@ -59,6 +59,7 @@
 <h4 class="mb-3">Upcoming Deadlines (Next 60 Days)</h4>
 
 {% if upcoming_by_client %}
+<div class="table-responsive">
 <table class="table table-hover">
     <thead>
         <tr>
@@ -73,10 +74,10 @@
         {% for group in upcoming_by_client %}
         <tr>
             <td><a href="{{ url_for('client_detail', client_id=group.client.id) }}">{{ group.client.name }}</a></td>
-            <td>
+            <td style="min-width: 12rem; white-space: normal;">
                 {% for dl in group.deadlines %}
                 <div class="{% if not loop.last %}mb-1{% endif %}">
-                    <span class="badge bg-secondary">{{ dl.deadline_type | deadline_label }}</span>
+                    <span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span>
                     {{ dl.due_date | format_date }}
                     {% if dl.comments %}
                     <div class="text-muted small">{{ dl.comments }}</div>
@@ -99,12 +100,14 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
 <div class="alert alert-info">No upcoming deadlines.</div>
 {% endif %}
 
 {% if overdue %}
 <h4 class="mt-4 text-danger">Overdue Deadlines</h4>
+<div class="table-responsive">
 <table class="table table-hover table-danger">
     <thead>
         <tr>
@@ -119,7 +122,7 @@
         {% for dl in overdue %}
         <tr>
             <td><a href="{{ url_for('client_detail', client_id=dl.client.id) }}">{{ dl.client.name }}</a></td>
-            <td>{{ dl.deadline_type | deadline_label }}</td>
+            <td><span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span></td>
             <td>{{ dl.due_date | format_date }}</td>
             <td>{{ dl.get_days_left()|abs }} days</td>
             <td><a href="{{ url_for('client_detail', client_id=dl.client.id) }}" class="btn btn-sm btn-danger">Manage</a></td>
@@ -127,11 +130,13 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% endif %}
 
 <h4 class="mt-4">Upcoming Invoice Payments</h4>
 
 {% if upcoming_invoices %}
+<div class="table-responsive">
 <table class="table table-hover">
     <thead>
         <tr>
@@ -147,7 +152,9 @@
         {% for inv in upcoming_invoices %}
         <tr>
             <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}">{{ inv.client.name }}</a></td>
-            <td><span class="badge bg-info text-dark">{{ inv.invoice_type }}</span></td>
+            <td>
+                <span class="badge badge-invoice {% if inv.invoice_type == 'Secretarial Fee' %}badge-invoice-secretarial{% elif inv.invoice_type == 'Registered Address' %}badge-invoice-address{% elif inv.invoice_type == 'Director Fee' %}badge-invoice-director{% else %}badge-invoice-other{% endif %}">{{ inv.invoice_type }}</span>
+            </td>
             <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
             <td>{{ inv.due_date | format_date }}</td>
             <td>
@@ -164,12 +171,14 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
 <div class="alert alert-info">No upcoming invoice payments.</div>
 {% endif %}
 
 {% if overdue_invoices %}
 <h4 class="mt-4 text-danger">Overdue Invoice Payments</h4>
+<div class="table-responsive">
 <table class="table table-hover table-danger">
     <thead>
         <tr>
@@ -194,6 +203,7 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% endif %}
 
 {% endblock %}

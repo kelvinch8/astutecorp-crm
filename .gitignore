@@ -6,4 +6,5 @@ __pycache__/
 instance/*.db
 instance/*.log
 instance/*.pid
+instance/uploads/
 .env

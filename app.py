@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, abort
 from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
+from flask_wtf.file import MultipleFileField, FileAllowed
 from wtforms import StringField, IntegerField, DateField, TextAreaField, SelectField, SubmitField, PasswordField
 from wtforms.validators import DataRequired, Email, Optional, NumberRange, Length, EqualTo
 from datetime import datetime, date, timedelta
@@ -14,8 +15,10 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+import uuid
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'corp-crm-super-secret-key-change-me')
@@ -23,6 +26,15 @@ os.makedirs(app.instance_path, exist_ok=True)
 _default_db = 'sqlite:///' + os.path.join(app.instance_path, 'corp_crm.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', _default_db)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB total per request
+app.config['UPLOAD_FOLDER'] = os.path.join(app.instance_path, 'uploads')
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+ALLOWED_NOTE_EXTENSIONS = {
+    'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp',
+    'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt',
+    'zip', 'heic',
+}
 
 db = SQLAlchemy(app)
 
@@ -101,6 +113,19 @@ class Note(db.Model):
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text)
     category = db.Column(db.String(50), default='General')  # ACRA, IRAS, Client, General
+    attachments = db.relationship(
+        'NoteAttachment',
+        backref='note',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+
+class NoteAttachment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    note_id = db.Column(db.Integer, db.ForeignKey('note.id'), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
 
 class Setting(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -193,7 +218,62 @@ class NoteForm(FlaskForm):
         ('Client', 'Client Communication'),
         ('Other', 'Other')
     ], default='General')
+    attachments = MultipleFileField(
+        'Attachments',
+        validators=[
+            FileAllowed(
+                list(ALLOWED_NOTE_EXTENSIONS),
+                'Allowed types: PDF, images, Word, Excel, CSV, TXT, ZIP',
+            )
+        ],
+    )
     submit = SubmitField('Add Note')
+
+
+def allowed_note_file(filename):
+    if not filename or '.' not in filename:
+        return False
+    return filename.rsplit('.', 1)[1].lower() in ALLOWED_NOTE_EXTENSIONS
+
+
+def save_note_attachments(note, file_list):
+    """Save uploaded files for a note. Returns (saved_count, error_message)."""
+    if not file_list:
+        return 0, None
+    upload_root = app.config['UPLOAD_FOLDER']
+    note_dir = os.path.join(upload_root, 'notes', str(note.client_id), str(note.id))
+    os.makedirs(note_dir, exist_ok=True)
+    saved = 0
+    for storage in file_list:
+        if not storage or not storage.filename:
+            continue
+        original = storage.filename
+        if not allowed_note_file(original):
+            return saved, f'File type not allowed: {original}'
+        safe = secure_filename(original) or 'file'
+        stored = f'{uuid.uuid4().hex}_{safe}'
+        path = os.path.join(note_dir, stored)
+        storage.save(path)
+        size = os.path.getsize(path)
+        db.session.add(NoteAttachment(
+            note_id=note.id,
+            original_filename=original[:255],
+            stored_filename=stored,
+            file_size=size,
+        ))
+        saved += 1
+    return saved, None
+
+
+def note_attachment_path(attachment):
+    note = attachment.note
+    return os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        'notes',
+        str(note.client_id),
+        str(note.id),
+        attachment.stored_filename,
+    )
 
 class SettingsForm(FlaskForm):
     my_email = StringField('Your Email (for reminders)', validators=[DataRequired(), Email()])
@@ -274,6 +354,28 @@ Phone: {client_phone}
 Deadline: {deadline_type}
 Due Date: {due_date}
 Days Remaining: {days_remaining}
+Status: {deadline_status}
+Notes: {comments}
+
+---
+AstuteCorp CRM"""
+
+DEFAULT_OVERDUE_INTERNAL_SUBJECT = 'OVERDUE: {client_name} - {deadline_type} was due {due_date}'
+
+DEFAULT_OVERDUE_INTERNAL_BODY = """Hi,
+
+A client deadline is OVERDUE. Please follow up with the client.
+
+Client: {client_name}
+UEN: {uen}
+Contact: {contact_person}
+Email: {client_email}
+Phone: {client_phone}
+
+Deadline: {deadline_type}
+Due Date: {due_date}
+Days Overdue: {days_overdue}
+Status: {deadline_status}
 Notes: {comments}
 
 ---
@@ -306,9 +408,21 @@ REMINDER_TEMPLATE_PLACEHOLDERS = [
     ('{comments}', 'Deadline comments/notes'),
 ]
 
+DEADLINE_TYPE_BADGE_CLASSES = {
+    'FinancialYearEnd': 'badge-deadline-fye',
+    'AGM': 'badge-deadline-agm',
+    'AnnualReturn': 'badge-deadline-ar',
+    'ECI': 'badge-deadline-eci',
+    'TaxFiling': 'badge-deadline-tax',
+}
+
 @app.template_filter('deadline_label')
 def deadline_label(deadline_type):
     return DEADLINE_TYPE_LABELS.get(deadline_type, deadline_type)
+
+@app.template_filter('deadline_badge_class')
+def deadline_badge_class(deadline_type):
+    return DEADLINE_TYPE_BADGE_CLASSES.get(deadline_type, 'badge-deadline-default')
 
 @app.template_filter('month_name')
 def month_name(month_number):
@@ -336,6 +450,19 @@ def get_client_reminder_templates(settings):
 def build_deadline_template_values(deadline):
     client = deadline.client
     deadline_name = DEADLINE_TYPE_LABELS.get(deadline.deadline_type, deadline.deadline_type)
+    days_left = deadline.get_days_left()
+    if days_left < 0:
+        deadline_status = 'OVERDUE'
+        days_remaining_display = f'{abs(days_left)} day(s) overdue'
+        days_overdue = abs(days_left)
+    elif days_left == 0:
+        deadline_status = 'DUE TODAY'
+        days_remaining_display = 'Due today'
+        days_overdue = 0
+    else:
+        deadline_status = 'Upcoming'
+        days_remaining_display = days_left
+        days_overdue = 0
     return {
         'contact_person': client.contact_person or 'Client',
         'client_name': client.name,
@@ -344,7 +471,9 @@ def build_deadline_template_values(deadline):
         'client_phone': client.phone or 'Not set',
         'deadline_type': deadline_name,
         'due_date': format_date_display(deadline.due_date),
-        'days_remaining': deadline.get_days_left(),
+        'days_remaining': days_remaining_display,
+        'days_overdue': days_overdue,
+        'deadline_status': deadline_status,
         'comments': (deadline.comments or '').strip() or 'None',
     }
 
@@ -475,31 +604,38 @@ def send_email(to_email, subject, body, is_html=False):
         print(f"❌ Email failed to {to_email}: {e}")
         return False
 
-def send_deadline_reminder(deadline):
-    """Email you about an upcoming deadline; optionally email the client too."""
+def send_deadline_reminder(deadline, overdue=False):
+    """Email you about an upcoming or overdue deadline; optionally email the client too."""
     client = deadline.client
     settings = Setting.query.first()
-    if not client or not settings:
+    if not client or not settings or not settings.my_email:
         return False
 
     template_values = build_deadline_template_values(deadline)
 
-    internal_subject_template, internal_body_template = get_internal_reminder_templates(settings)
-    internal_subject = render_reminder_template(internal_subject_template, **template_values)
-    internal_body = render_reminder_template(internal_body_template, **template_values)
+    if overdue:
+        # Clear overdue wording for you — still use custom templates if they work with placeholders
+        internal_subject = render_reminder_template(DEFAULT_OVERDUE_INTERNAL_SUBJECT, **template_values)
+        internal_body = render_reminder_template(DEFAULT_OVERDUE_INTERNAL_BODY, **template_values)
+    else:
+        internal_subject_template, internal_body_template = get_internal_reminder_templates(settings)
+        internal_subject = render_reminder_template(internal_subject_template, **template_values)
+        internal_body = render_reminder_template(internal_body_template, **template_values)
+
     sent_to_self = send_email(settings.my_email, f"[AstuteCorp CRM] {internal_subject}", internal_body)
 
     sent_to_client = True
-    if settings.email_client and client.email:
+    # Only auto-email the client for upcoming deadlines (not overdue), when enabled
+    if not overdue and settings.email_client and client.email:
         client_subject_template, client_body_template = get_client_reminder_templates(settings)
         client_subject = render_reminder_template(client_subject_template, **template_values)
         client_body = render_reminder_template(client_body_template, **template_values)
         sent_to_client = send_email(client.email, client_subject, client_body)
 
-    if sent_to_self or sent_to_client:
+    if sent_to_self or (not overdue and sent_to_client):
         deadline.last_reminded = date.today()
         db.session.commit()
-        return True
+        return bool(sent_to_self)
     return False
 
 def send_test_reminder_email():
@@ -533,22 +669,39 @@ def check_and_send_reminders():
         return _check_and_send_reminders()
 
 def _check_and_send_reminders():
+    """Send approaching + overdue deadline emails (once per day per deadline)."""
     today = date.today()
     sent_count = 0
 
+    # Pending and already-Overdue deadlines (until marked Completed)
     deadlines = Deadline.query.join(Client).filter(
         Client.archived == False,
-        Deadline.status == 'Pending'
+        Deadline.status.in_(['Pending', 'Overdue'])
     ).all()
     for dl in deadlines:
         days_left = dl.get_days_left()
-        if days_left <= 0:
-            dl.status = 'Overdue'
-            db.session.commit()
+        already_reminded_today = dl.last_reminded and dl.last_reminded >= today
+
+        # Past due → mark Overdue and email you daily until completed
+        if days_left < 0:
+            if dl.status != 'Overdue':
+                dl.status = 'Overdue'
+                db.session.commit()
+            if not already_reminded_today:
+                if send_deadline_reminder(dl, overdue=True):
+                    sent_count += 1
             continue
 
-        if dl.reminder_days >= days_left and (not dl.last_reminded or dl.last_reminded < today):
-            if send_deadline_reminder(dl):
+        # Due today → email you (treated as urgent / overdue-style notice)
+        if days_left == 0:
+            if not already_reminded_today:
+                if send_deadline_reminder(dl, overdue=True):
+                    sent_count += 1
+            continue
+
+        # Upcoming within reminder window (e.g. 7 days before)
+        if dl.reminder_days >= days_left and not already_reminded_today:
+            if send_deadline_reminder(dl, overdue=False):
                 sent_count += 1
 
     invoices = Invoice.query.join(Client).filter(
@@ -664,6 +817,9 @@ def format_notes_export(client):
         line = f'[{note.category}] {note.title} ({format_date_display(note.timestamp, include_time=True)})'
         if note.content:
             line += f': {note.content}'
+        if note.attachments:
+            names = ', '.join(a.original_filename for a in note.attachments)
+            line += f' [files: {names}]'
         lines.append(line)
     return '\n'.join(lines)
 
@@ -907,6 +1063,7 @@ def deadline_delete(client_id, dl_id):
 @app.route('/clients/<int:client_id>/notes/new', methods=['POST'])
 @login_required
 def note_new(client_id):
+    Client.query.get_or_404(client_id)
     form = NoteForm()
     if form.validate_on_submit():
         note = Note(
@@ -916,9 +1073,45 @@ def note_new(client_id):
             category=form.category.data
         )
         db.session.add(note)
+        db.session.flush()  # get note.id for upload folder
+
+        files = request.files.getlist('attachments')
+        saved, err = save_note_attachments(note, files)
+        if err:
+            db.session.rollback()
+            flash(err, 'danger')
+            return redirect(url_for('client_detail', client_id=client_id))
+
         db.session.commit()
-        flash('Note added successfully.', 'success')
+        if saved:
+            flash(f'Note added with {saved} attachment{"s" if saved != 1 else ""}.', 'success')
+        else:
+            flash('Note added successfully.', 'success')
+    else:
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f'{error}', 'danger')
+                break
     return redirect(url_for('client_detail', client_id=client_id))
+
+
+@app.route('/clients/<int:client_id>/notes/attachments/<int:attachment_id>/download')
+@login_required
+def note_attachment_download(client_id, attachment_id):
+    Client.query.get_or_404(client_id)
+    attachment = NoteAttachment.query.get_or_404(attachment_id)
+    note = attachment.note
+    if not note or note.client_id != client_id:
+        abort(404)
+    path = note_attachment_path(attachment)
+    if not os.path.isfile(path):
+        flash('Attachment file is missing on the server.', 'danger')
+        return redirect(url_for('client_detail', client_id=client_id))
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=attachment.original_filename,
+    )
 
 @app.route('/clients/<int:client_id>/calculate-deadlines', methods=['POST'])
 @login_required
@@ -1017,7 +1210,12 @@ def send_reminders():
     if count:
         flash(f'{count} deadline reminder email(s) sent to your inbox.', 'success')
     else:
-        flash('No reminders due right now. Emails are sent when a deadline is within its reminder window.', 'info')
+        flash(
+            'No new reminders to send right now. '
+            'Emails go out when a deadline is within its reminder window, due today, or overdue '
+            '(once per day). Automatic check runs daily at 9:00 AM SGT.',
+            'info'
+        )
     return redirect(request.referrer or url_for('dashboard'))
 
 @app.route('/settings', methods=['GET', 'POST'])
