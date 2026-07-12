@@ -612,9 +612,10 @@
 <body>
 <nav class="navbar navbar-expand-lg">
     <div class="container">
-        <a class="navbar-brand" href="{{ url_for('dashboard') }}" title="AstuteCorp CRM">
+        <a class="navbar-brand" href="{% if current_user.is_authenticated %}{{ url_for('dashboard') }}{% else %}{{ url_for('login') }}{% endif %}" title="AstuteCorp CRM">
             <img src="{{ url_for('static', filename='img/astute-logo.png') }}" alt="Astute Solutions" class="brand-logo">
         </a>
+        {% if current_user.is_authenticated %}
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -624,28 +625,25 @@
                 <li class="nav-item"><a class="nav-link {% if request.endpoint and request.endpoint.startswith('client') %}active{% endif %}" href="{{ url_for('clients_list') }}">Clients</a></li>
             </ul>
             <div class="d-flex align-items-center flex-wrap gap-1 navbar-actions">
-                {% if current_user.is_authenticated %}
-                    <span class="welcome-text small me-1 d-none d-lg-inline">{{ current_user.username }}</span>
-                    <a href="{{ url_for('users') }}" class="btn btn-outline-nav btn-sm">
-                        <i class="bi bi-people"></i> Users
-                    </a>
-                    <a href="{{ url_for('change_password') }}" class="btn btn-outline-nav btn-sm">
-                        <i class="bi bi-key"></i> Password
-                    </a>
-                    <a href="{{ url_for('settings') }}" class="btn btn-outline-nav btn-sm">
-                        <i class="bi bi-gear"></i> Settings
-                    </a>
-                    <form action="{{ url_for('send_reminders') }}" method="post" class="d-inline">
-                        <button type="submit" class="btn btn-warning btn-sm">
-                            <i class="bi bi-envelope"></i> Send Reminders
-                        </button>
-                    </form>
-                    <a href="{{ url_for('logout') }}" class="btn btn-outline-nav btn-sm btn-logout">Logout</a>
-                {% else %}
-                    <a href="{{ url_for('login') }}" class="btn btn-primary btn-sm">Login</a>
-                {% endif %}
+                <span class="welcome-text small me-1 d-none d-lg-inline">{{ current_user.username }}</span>
+                <a href="{{ url_for('users') }}" class="btn btn-outline-nav btn-sm">
+                    <i class="bi bi-people"></i> Users
+                </a>
+                <a href="{{ url_for('change_password') }}" class="btn btn-outline-nav btn-sm">
+                    <i class="bi bi-key"></i> Password
+                </a>
+                <a href="{{ url_for('settings') }}" class="btn btn-outline-nav btn-sm">
+                    <i class="bi bi-gear"></i> Settings
+                </a>
+                <form action="{{ url_for('send_reminders') }}" method="post" class="d-inline">
+                    <button type="submit" class="btn btn-warning btn-sm">
+                        <i class="bi bi-envelope"></i> Send Reminders
+                    </button>
+                </form>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-nav btn-sm btn-logout">Logout</a>
             </div>
         </div>
+        {% endif %}
     </div>
 </nav>
 
