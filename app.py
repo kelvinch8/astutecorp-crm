@@ -25,8 +25,16 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'corp-crm-super-secret-key-change-me')
 os.makedirs(app.instance_path, exist_ok=True)
-_default_db = 'sqlite:///' + os.path.join(app.instance_path, 'corp_crm.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', _default_db)
+
+# Prefer Render persistent disk (/var/data) when mounted, so data survives deploys
+_instance_db = os.path.join(app.instance_path, 'corp_crm.db')
+if os.environ.get('DATABASE_URL'):
+    _default_db_uri = os.environ['DATABASE_URL']
+elif os.path.isdir('/var/data'):
+    _default_db_uri = 'sqlite:////var/data/corp_crm.db'
+else:
+    _default_db_uri = 'sqlite:///' + _instance_db
+app.config['SQLALCHEMY_DATABASE_URI'] = _default_db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB total per request
 
@@ -36,14 +44,13 @@ def get_sqlite_filesystem_path():
     if not uri.startswith('sqlite:///'):
         return None
     path = uri[len('sqlite:///'):]
-    if path.startswith('/') and not path.startswith('//'):
-        # sqlite:////abs/path → /abs/path after stripping sqlite:///
+    if path.startswith('/'):
         return path
     if not os.path.isabs(path):
         path = os.path.join(app.root_path, path)
     return path
 
-# Keep uploads on the same persistent volume as the DB when on Render (/var/data)
+# Keep uploads on the same volume as the DB when possible
 _db_path = get_sqlite_filesystem_path()
 if _db_path and _db_path.startswith('/var/data'):
     app.config['UPLOAD_FOLDER'] = '/var/data/uploads'
@@ -1336,20 +1343,32 @@ def replace_sqlite_database(source_path):
     dest = get_sqlite_filesystem_path()
     if not dest:
         return False, 'Database path is not SQLite; cannot import.'
-    os.makedirs(os.path.dirname(dest) or '.', exist_ok=True)
+    targets = [dest]
+    # Also write to persistent disk when available (Render)
+    if os.path.isdir('/var/data'):
+        persistent = '/var/data/corp_crm.db'
+        if persistent not in targets:
+            targets.append(persistent)
     # Drop active connections before swapping the file
     db.session.remove()
     db.engine.dispose()
-    if os.path.isfile(dest):
-        backup = dest + f'.bak-{datetime.utcnow().strftime("%Y%m%d%H%M%S")}'
-        shutil.copy2(dest, backup)
-    shutil.copy2(source_path, dest)
+    written = []
+    for target in targets:
+        os.makedirs(os.path.dirname(target) or '.', exist_ok=True)
+        if os.path.isfile(target):
+            backup = target + f'.bak-{datetime.utcnow().strftime("%Y%m%d%H%M%S")}'
+            try:
+                shutil.copy2(target, backup)
+            except OSError:
+                pass
+        shutil.copy2(source_path, target)
+        written.append(target)
     # Re-bind and ensure schema
     db.engine.dispose()
     with app.app_context():
         db.create_all()
         migrate_database()
-    return True, dest
+    return True, written[0]
 
 
 @app.route('/settings/export-database')
