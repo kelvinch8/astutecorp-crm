@@ -6,7 +6,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from flask_wtf.file import MultipleFileField, FileAllowed
 from wtforms import StringField, IntegerField, DateField, TextAreaField, SelectField, SubmitField, PasswordField
-from wtforms.validators import DataRequired, Email, Optional, NumberRange, Length, EqualTo
+from wtforms.validators import DataRequired, Email, Optional, NumberRange, Length, EqualTo, ValidationError
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
@@ -15,6 +15,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+import re
 import uuid
 import shutil
 import sqlite3 as sqlite3_stdlib
@@ -87,7 +88,7 @@ class Client(db.Model):
     name = db.Column(db.String(150), nullable=False)
     uen = db.Column(db.String(20), unique=True, nullable=False)
     contact_person = db.Column(db.String(100))
-    email = db.Column(db.String(120))
+    email = db.Column(db.String(500))  # one or more addresses, comma/semicolon separated
     phone = db.Column(db.String(30))
     fye_month = db.Column(db.Integer)  # 1-12
     incorporation_date = db.Column(db.Date)
@@ -100,6 +101,15 @@ class Client(db.Model):
     deadlines = db.relationship('Deadline', backref='client', lazy=True, cascade="all, delete-orphan")
     invoices = db.relationship('Invoice', backref='client', lazy=True, cascade="all, delete-orphan")
     notes = db.relationship('Note', backref='client', lazy=True, cascade="all, delete-orphan")
+
+    def email_list(self):
+        """Return all client email addresses as a list."""
+        return parse_emails(self.email)
+
+    def emails_display(self):
+        """Comma-separated display of all client emails."""
+        emails = self.email_list()
+        return ', '.join(emails) if emails else ''
 
     def __repr__(self):
         return f'<Client {self.name}>'
@@ -203,11 +213,55 @@ def optional_int_coerce(value):
         return None
     return int(value)
 
+
+# Split on commas, semicolons, or newlines (not spaces inside addresses)
+_EMAIL_SPLIT_RE = re.compile(r'[,;\n\r]+')
+_EMAIL_SIMPLE_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def parse_emails(value):
+    """Parse one or more email addresses from a free-text field."""
+    if not value:
+        return []
+    parts = _EMAIL_SPLIT_RE.split(str(value).strip())
+    seen = set()
+    result = []
+    for part in parts:
+        email = part.strip()
+        if not email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(email)
+    return result
+
+
+def validate_multi_email(form, field):
+    """Allow one or more emails separated by commas or semicolons."""
+    raw = (field.data or '').strip()
+    if not raw:
+        return
+    emails = parse_emails(raw)
+    if not emails:
+        raise ValidationError('Enter one or more valid email addresses separated by commas.')
+    for email in emails:
+        if not _EMAIL_SIMPLE_RE.match(email):
+            raise ValidationError(f'Invalid email address: {email}')
+    # Normalise stored value to comma-separated
+    field.data = ', '.join(emails)
+
+
 class ClientForm(FlaskForm):
     name = StringField('Client Name', validators=[DataRequired()])
     uen = StringField('UEN', validators=[DataRequired()])
     contact_person = StringField('Contact Person')
-    email = StringField('Client Email', validators=[Optional(), Email()])
+    email = StringField(
+        'Client Email(s)',
+        validators=[Optional(), validate_multi_email],
+        description='Separate multiple addresses with commas, e.g. a@company.com, b@company.com',
+    )
     phone = StringField('Phone')
     fye_month = SelectField(
         'Financial Year End Month',
@@ -224,7 +278,8 @@ class DeadlineForm(FlaskForm):
         ('AGM', 'AGM Deadline'),
         ('AnnualReturn', 'Annual Return Filing'),
         ('ECI', 'ECI Filing'),
-        ('TaxFiling', 'Income Tax Filing')
+        ('TaxFiling', 'Income Tax Filing'),
+        ('Others', 'Others'),
     ], validators=[DataRequired()])
     due_date = DateField('Due Date', validators=[DataRequired()])
     reminder_days = IntegerField('Email me this many days before', default=7, validators=[NumberRange(min=1)])
@@ -397,6 +452,23 @@ class ClientReminderForm(FlaskForm):
     )
     submit = SubmitField('Send reminder email')
 
+
+class ClientLettersForm(FlaskForm):
+    """Compose email notifying client that mail/letters are ready for collection."""
+    subject = StringField('Email subject', validators=[DataRequired(), Length(max=300)])
+    body = TextAreaField('Email message', validators=[DataRequired(), Length(max=10000)])
+    send_to_me = SelectField(
+        'Email me a copy',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    send_to_client = SelectField(
+        'Email the client',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    submit = SubmitField('Send letters notice')
+
 # ==================== HELPER FUNCTIONS ====================
 
 PASSWORD_RESET_SALT = 'astutecorp-crm-password-reset'
@@ -420,6 +492,7 @@ def verify_password_reset_token(token, max_age=PASSWORD_RESET_MAX_AGE):
     except BadSignature:
         return None
 
+# Types used by Calculate from FYE (Others is manual-only and never auto-added)
 DEADLINE_TYPES = ['FinancialYearEnd', 'ECI', 'AGM', 'AnnualReturn', 'TaxFiling']
 
 DEADLINE_TYPE_LABELS = {
@@ -428,7 +501,19 @@ DEADLINE_TYPE_LABELS = {
     'AnnualReturn': 'Annual Return Filing',
     'ECI': 'ECI Filing',
     'TaxFiling': 'Income Tax Filing',
+    'Others': 'Others',
 }
+
+DEFAULT_LETTERS_SUBJECT = 'Mail / letters awaiting collection — {client_name}'
+DEFAULT_LETTERS_BODY = (
+    'Dear {contact_person},\n\n'
+    'We are writing to inform you that we have received letter(s) and/or mail for '
+    '{client_name} (UEN: {uen}) at our office under our registered address service.\n\n'
+    'Please arrange to collect them at your earliest convenience during our office hours.\n\n'
+    'If you have any questions, please reply to this email.\n\n'
+    'Best regards,\n'
+    'Astute Solutions'
+)
 
 DEFAULT_INTERNAL_REMINDER_SUBJECT = 'Upcoming deadline: {client_name} - {deadline_type} in {days_remaining} days'
 
@@ -491,7 +576,7 @@ REMINDER_TEMPLATE_PLACEHOLDERS = [
     ('{contact_person}', 'Client contact person (or "Client" if blank)'),
     ('{client_name}', 'Client company name'),
     ('{uen}', 'Client UEN'),
-    ('{client_email}', 'Client email address'),
+    ('{client_email}', 'Client email address(es)'),
     ('{client_phone}', 'Client phone number'),
     ('{deadline_type}', 'Deadline type, e.g. AGM Deadline'),
     ('{due_date}', 'Due date in dd-mm-yyyy format'),
@@ -505,6 +590,7 @@ DEADLINE_TYPE_BADGE_CLASSES = {
     'AnnualReturn': 'badge-deadline-ar',
     'ECI': 'badge-deadline-eci',
     'TaxFiling': 'badge-deadline-tax',
+    'Others': 'badge-deadline-others',
 }
 
 @app.template_filter('deadline_label')
@@ -619,7 +705,7 @@ def build_deadline_template_values(deadline):
         'contact_person': client.contact_person or 'Client',
         'client_name': client.name,
         'uen': client.uen,
-        'client_email': client.email or 'Not set',
+        'client_email': client.emails_display() or 'Not set',
         'client_phone': client.phone or 'Not set',
         'deadline_type': deadline_name,
         'due_date': format_date_display(deadline.due_date),
@@ -715,7 +801,7 @@ def get_fye_reference_deadlines(client_id):
 _last_email_error = None
 
 def send_email(to_email, subject, body, is_html=False):
-    """Send email using settings from DB."""
+    """Send email using settings from DB. to_email may be one address or a list."""
     global _last_email_error
     settings = Setting.query.first()
     if not settings or not settings.my_email:
@@ -731,10 +817,19 @@ def send_email(to_email, subject, body, is_html=False):
         _last_email_error = 'SMTP username and password are required.'
         return False
 
+    if isinstance(to_email, (list, tuple)):
+        recipients = [e.strip() for e in to_email if e and str(e).strip()]
+    else:
+        recipients = [str(to_email).strip()] if to_email and str(to_email).strip() else []
+
+    if not recipients:
+        _last_email_error = 'No recipient email address provided.'
+        return False
+
     try:
         msg = MIMEMultipart()
         msg['From'] = settings.my_email
-        msg['To'] = to_email
+        msg['To'] = ', '.join(recipients)
         msg['Subject'] = subject
 
         if is_html:
@@ -749,12 +844,25 @@ def send_email(to_email, subject, body, is_html=False):
         server.send_message(msg)
         server.quit()
         _last_email_error = None
-        print(f"✅ Email sent to {to_email}")
+        print(f"✅ Email sent to {', '.join(recipients)}")
         return True
     except Exception as e:
         _last_email_error = str(e)
-        print(f"❌ Email failed to {to_email}: {e}")
+        print(f"❌ Email failed to {', '.join(recipients)}: {e}")
         return False
+
+
+def send_email_to_each(emails, subject, body, is_html=False):
+    """Send the same email to each address individually. Returns (sent_list, failed_list)."""
+    sent = []
+    failed = []
+    for email in emails:
+        if send_email(email, subject, body, is_html=is_html):
+            sent.append(email)
+        else:
+            failed.append(email)
+    return sent, failed
+
 
 def send_deadline_reminder(deadline, overdue=False):
     """Email you about an upcoming or overdue deadline; optionally email the client too."""
@@ -778,17 +886,31 @@ def send_deadline_reminder(deadline, overdue=False):
 
     sent_to_client = True
     # Only auto-email the client for upcoming deadlines (not overdue), when enabled
-    if not overdue and settings.email_client and client.email:
+    client_emails = client.email_list()
+    if not overdue and settings.email_client and client_emails:
         client_subject_template, client_body_template = get_client_reminder_templates(settings)
         client_subject = render_reminder_template(client_subject_template, **template_values)
         client_body = render_reminder_template(client_body_template, **template_values)
-        sent_to_client = send_email(client.email, client_subject, client_body)
+        sent_ok, _failed = send_email_to_each(client_emails, client_subject, client_body)
+        sent_to_client = bool(sent_ok)
 
     if sent_to_self or (not overdue and sent_to_client):
         deadline.last_reminded = date.today()
         db.session.commit()
         return bool(sent_to_self)
     return False
+
+
+def build_letters_notice_defaults(client):
+    """Default subject/body for registered-address letters collection notice."""
+    values = {
+        'contact_person': client.contact_person or 'Client',
+        'client_name': client.name,
+        'uen': client.uen or '-',
+    }
+    subject = render_reminder_template(DEFAULT_LETTERS_SUBJECT, **values)
+    body = render_reminder_template(DEFAULT_LETTERS_BODY, **values)
+    return subject, body
 
 def send_test_reminder_email():
     """Send a sample reminder email to verify SMTP settings."""
@@ -1134,6 +1256,7 @@ def client_send_reminder(client_id):
     settings = Setting.query.first()
     deadlines = get_client_open_deadlines(client_id)
     form = ClientReminderForm()
+    client_emails = client.email_list()
 
     if request.method == 'GET':
         # Reuse last saved message for this client if available
@@ -1144,7 +1267,7 @@ def client_send_reminder(client_id):
             subject, body, _summary = build_client_reminder_defaults(client, deadlines, settings)
             form.subject.data = subject
             form.body.data = body
-        form.send_to_client.data = 'True' if client.email else 'False'
+        form.send_to_client.data = 'True' if client_emails else 'False'
         form.send_to_me.data = 'True'
 
     if form.validate_on_submit():
@@ -1180,12 +1303,14 @@ def client_send_reminder(client_id):
                 failed.append(f'you ({_last_email_error or "error"})')
 
         if to_client:
-            if not client.email:
+            if not client_emails:
                 failed.append('client (no email on file)')
-            elif send_email(client.email, subject, body):
-                sent.append(f'client ({client.email})')
             else:
-                failed.append(f'client ({_last_email_error or "error"})')
+                ok, bad = send_email_to_each(client_emails, subject, body)
+                for e in ok:
+                    sent.append(f'client ({e})')
+                for e in bad:
+                    failed.append(f'client ({e}: {_last_email_error or "error"})')
 
         if sent:
             today = date.today()
@@ -1204,7 +1329,7 @@ def client_send_reminder(client_id):
             ))
             db.session.commit()
             flash(
-                f'Reminder sent to: {recipients_note}. Message saved for this client and logged in Activity & Notes.',
+                f'Reminder sent to: {", ".join(sent)}. Message saved for this client and logged in Activity & Notes.',
                 'success',
             )
         if failed:
@@ -1222,6 +1347,76 @@ def client_send_reminder(client_id):
             and (client.saved_reminder_body or '').strip()
         ),
     )
+
+
+@app.route('/clients/<int:client_id>/send-letters', methods=['GET', 'POST'])
+@login_required
+def client_send_letters(client_id):
+    """Notify client that letters/mail are ready for collection (registered address service)."""
+    client = Client.query.get_or_404(client_id)
+    settings = Setting.query.first()
+    form = ClientLettersForm()
+    client_emails = client.email_list()
+
+    if request.method == 'GET':
+        subject, body = build_letters_notice_defaults(client)
+        form.subject.data = subject
+        form.body.data = body
+        form.send_to_client.data = 'True' if client_emails else 'False'
+        form.send_to_me.data = 'True'
+
+    if form.validate_on_submit():
+        to_me = form.send_to_me.data == 'True'
+        to_client = form.send_to_client.data == 'True'
+        if not to_me and not to_client:
+            flash('Choose at least one recipient: you and/or the client.', 'warning')
+            return render_template('clients/send_letters.html', form=form, client=client)
+        if not settings or not settings.my_email:
+            flash('Configure Your Email and SMTP in Settings before sending.', 'danger')
+            return redirect(url_for('settings'))
+
+        subject = form.subject.data.strip()
+        body = form.body.data.strip()
+        sent = []
+        failed = []
+
+        if to_me:
+            if send_email(settings.my_email, f'[AstuteCorp CRM] {subject}', body):
+                sent.append(f'you ({settings.my_email})')
+            else:
+                failed.append(f'you ({_last_email_error or "error"})')
+
+        if to_client:
+            if not client_emails:
+                failed.append('client (no email on file)')
+            else:
+                ok, bad = send_email_to_each(client_emails, subject, body)
+                for e in ok:
+                    sent.append(f'client ({e})')
+                for e in bad:
+                    failed.append(f'client ({e}: {_last_email_error or "error"})')
+
+        if sent:
+            note_title = f'Letters collection notice sent: {subject[:140]}'
+            if len(subject) > 140:
+                note_title = f'Letters collection notice sent: {subject[:137]}...'
+            db.session.add(Note(
+                client_id=client.id,
+                title=note_title,
+                content='',
+                category='Client',
+            ))
+            db.session.commit()
+            flash(
+                f'Letters notice sent to: {", ".join(sent)}. Logged in Activity & Notes.',
+                'success',
+            )
+        if failed:
+            flash(f'Could not send to: {", ".join(failed)}.', 'danger')
+        if sent:
+            return redirect(url_for('client_detail', client_id=client_id))
+
+    return render_template('clients/send_letters.html', form=form, client=client)
 
 
 @app.route('/clients/<int:client_id>/delete', methods=['POST'])

@@ -8,8 +8,11 @@
         <h3 class="mb-1">Send email reminder</h3>
         <p class="text-muted mb-0 small">
             Only for <strong>{{ client.name }}</strong>
-            {% if client.email %}
-            · Client email: <code>{{ client.email }}</code>
+            {% if client.email_list() %}
+            · Client email(s):
+            {% for e in client.email_list() %}
+            <code>{{ e }}</code>{% if not loop.last %}, {% endif %}
+            {% endfor %}
             {% else %}
             · <span class="text-danger">No client email on file</span> (add under Edit Client, or send to yourself only)
             {% endif %}

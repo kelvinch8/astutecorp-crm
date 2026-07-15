@@ -28,7 +28,11 @@
                 </div>
                 <div class="col-md-6 mb-3">
                     {{ form.email.label(class="form-label") }}
-                    {{ form.email(class="form-control") }}
+                    {{ form.email(class="form-control", placeholder="e.g. a@company.com, b@company.com") }}
+                    <div class="form-text">You can enter more than one email. Separate with commas so reminders go to everyone listed.</div>
+                    {% if form.email.errors %}
+                    <div class="text-danger small">{{ form.email.errors[0] }}</div>
+                    {% endif %}
                 </div>
             </div>
 

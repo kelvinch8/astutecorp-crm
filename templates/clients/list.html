@@ -76,7 +76,7 @@
         <tr>
             <td><a href="{{ url_for('client_detail', client_id=client.id) }}">{{ client.name }}</a></td>
             <td><code>{{ client.uen }}</code></td>
-            <td style="white-space: normal; min-width: 8rem;">{{ client.contact_person or '-' }}<br><small>{{ client.email or '' }}</small></td>
+            <td style="white-space: normal; min-width: 8rem;">{{ client.contact_person or '-' }}<br><small>{{ client.emails_display() or '' }}</small></td>
             <td>{{ client.fye_month | month_name }}</td>
             <td>
                 {% set pending = client.deadlines | selectattr('status', 'eq', 'Pending') | list | length %}
