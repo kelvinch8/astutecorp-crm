@@ -127,7 +127,8 @@ class Deadline(db.Model):
 
     @property
     def is_overdue(self):
-        return self.status == 'Pending' and self.due_date < date.today()
+        # Include both Pending (not yet flipped by the daily job) and Overdue status
+        return self.status in ('Pending', 'Overdue') and self.due_date < date.today()
 
     def get_days_left(self):
         return (self.due_date - date.today()).days
@@ -146,7 +147,7 @@ class Invoice(db.Model):
 
     @property
     def is_overdue(self):
-        return self.status == 'Pending' and self.due_date < date.today()
+        return self.status in ('Pending', 'Overdue') and self.due_date < date.today()
 
     def get_days_left(self):
         return (self.due_date - date.today()).days
@@ -1005,11 +1006,13 @@ def dashboard():
     ).order_by(Deadline.due_date).all()
     upcoming_by_client = group_deadlines_by_client(upcoming)
 
+    # Include status Overdue (set by the daily reminder job) as well as
+    # Pending past-due items that have not been flipped yet.
     overdue = Deadline.query.join(Client).filter(
         Client.archived == False,
-        Deadline.status == 'Pending',
+        Deadline.status.in_(['Pending', 'Overdue']),
         Deadline.due_date < today
-    ).all()
+    ).order_by(Deadline.due_date).all()
 
     upcoming_invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
@@ -1019,18 +1022,18 @@ def dashboard():
 
     overdue_invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
-        Invoice.status == 'Pending',
+        Invoice.status.in_(['Pending', 'Overdue']),
         Invoice.due_date < today
-    ).all()
+    ).order_by(Invoice.due_date).all()
 
     clients_count = Client.query.filter_by(archived=False).count()
     pending_deadlines = Deadline.query.join(Client).filter(
         Client.archived == False,
-        Deadline.status == 'Pending'
+        Deadline.status.in_(['Pending', 'Overdue'])
     ).count()
     pending_invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
-        Invoice.status == 'Pending'
+        Invoice.status.in_(['Pending', 'Overdue'])
     ).count()
 
     return render_template('dashboard.html', 

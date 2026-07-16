@@ -82,7 +82,7 @@
                                 {% if dl.status == 'Completed' %}
                                     <span class="badge bg-success">Completed</span>
                                 {% elif dl.is_overdue %}
-                                    <span class="badge bg-danger">Overdue</span>
+                                    <span class="badge bg-danger">Overdue ({{ dl.get_days_left()|abs }} days)</span>
                                 {% else %}
                                     <span class="badge bg-warning text-dark">Pending ({{ dl.get_days_left() }} days)</span>
                                 {% endif %}
@@ -172,7 +172,7 @@
                         {% if inv.status == 'Paid' %}
                             <span class="badge bg-success">Paid</span>
                         {% elif inv.is_overdue %}
-                            <span class="badge bg-danger">Overdue</span>
+                            <span class="badge bg-danger">Overdue ({{ inv.get_days_left()|abs }} days)</span>
                         {% else %}
                             <span class="badge bg-warning text-dark">Pending ({{ inv.get_days_left() }} days)</span>
                         {% endif %}
