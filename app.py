@@ -765,6 +765,29 @@ def calculate_default_deadlines(fye_date):
 
     return deadlines
 
+# Comments made only of FYE/YA labels and dates, e.g. "FYE 30/09/2026" or "YA2027 DUE 30/11/2026"
+_YEAR_LABEL_COMMENT = re.compile(r'(?:FYE|YA|DUE|\d{1,2}/\d{1,2}/20\d\d|20\d\d|[\s:,-])*', re.IGNORECASE)
+
+def create_next_year_deadline(dl):
+    """Add the same recurring deadline one year later, unless one already exists. Returns it or None."""
+    if dl.deadline_type not in DEADLINE_TYPES:
+        return None
+    next_due = add_months_keep_month_end(dl.due_date, 12)
+    existing = Deadline.query.filter(
+        Deadline.client_id == dl.client_id,
+        Deadline.deadline_type == dl.deadline_type,
+        Deadline.due_date.between(next_due - timedelta(days=45), next_due + timedelta(days=45))
+    ).first()
+    if existing:
+        return None
+    comments = None
+    if dl.comments and _YEAR_LABEL_COMMENT.fullmatch(dl.comments.strip()):
+        comments = re.sub(r'20\d\d', lambda m: str(int(m.group()) + 1), dl.comments)
+    next_dl = Deadline(client_id=dl.client_id, deadline_type=dl.deadline_type, due_date=next_due,
+                       reminder_days=dl.reminder_days, comments=comments)
+    db.session.add(next_dl)
+    return next_dl
+
 def group_deadlines_by_client(deadlines):
     """Group deadline records into one row per client, sorted by earliest due date."""
     grouped = {}
@@ -1513,11 +1536,16 @@ def deadline_edit(client_id, dl_id):
 @app.route('/clients/<int:client_id>/deadlines/<int:dl_id>/complete', methods=['POST'])
 @login_required
 def deadline_complete(client_id, dl_id):
-    dl = Deadline.query.get_or_404(dl_id)
+    dl = Deadline.query.filter_by(id=dl_id, client_id=client_id).first_or_404()
     dl.status = 'Completed'
     dl.completed_date = date.today()
+    next_dl = create_next_year_deadline(dl)
     db.session.commit()
-    flash('Deadline marked as completed.', 'success')
+    if next_dl:
+        flash(f'Deadline marked as completed. Next year\'s {deadline_label(next_dl.deadline_type)} '
+              f'added for {format_date(next_dl.due_date)}.', 'success')
+    else:
+        flash('Deadline marked as completed.', 'success')
     return redirect(url_for('client_detail', client_id=client_id))
 
 @app.route('/clients/<int:client_id>/deadlines/<int:dl_id>/delete', methods=['POST'])
@@ -1670,7 +1698,7 @@ def invoice_edit(client_id, inv_id):
 @app.route('/clients/<int:client_id>/invoices/<int:inv_id>/paid', methods=['POST'])
 @login_required
 def invoice_paid(client_id, inv_id):
-    inv = Invoice.query.get_or_404(inv_id)
+    inv = Invoice.query.filter_by(id=inv_id, client_id=client_id).first_or_404()
     inv.status = 'Paid'
     inv.paid_date = date.today()
     db.session.commit()
