@@ -4,6 +4,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from urllib.parse import urlparse
 from flask_wtf.file import MultipleFileField, FileAllowed
 from wtforms import StringField, IntegerField, DateField, TextAreaField, SelectField, SubmitField, PasswordField
 from wtforms.validators import DataRequired, Email, Optional, NumberRange, Length, EqualTo, ValidationError
@@ -70,6 +72,16 @@ ALLOWED_NOTE_EXTENSIONS = {
 }
 
 db = SQLAlchemy(app)
+
+# CSRF tokens on every POST; tied to the login session rather than expiring after an hour
+app.config['WTF_CSRF_TIME_LIMIT'] = None
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+csrf = CSRFProtect(app)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    flash('Your session expired or the form was out of date. Please try again.', 'warning')
+    return redirect(request.referrer or url_for('dashboard'))
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -1878,6 +1890,7 @@ def import_database():
 
 
 @app.route('/internal/restore-database', methods=['POST'])
+@csrf.exempt  # called by script with its own token, not from a browser form
 def internal_restore_database():
     """One-time / emergency DB restore via token (no login). Disable after use."""
     token = request.headers.get('X-Restore-Token') or request.form.get('token') or ''
@@ -1921,7 +1934,11 @@ def login():
         if user and user.check_password(form.password.data):
             login_user(user)
             flash('Logged in successfully.', 'success')
-            next_page = request.args.get('next')
+            next_page = request.args.get('next') or ''
+            # Only follow same-site paths, never another domain
+            parsed = urlparse(next_page)
+            if parsed.scheme or parsed.netloc or not next_page.startswith('/') or next_page.startswith('//'):
+                next_page = None
             return redirect(next_page or url_for('dashboard'))
         else:
             flash('Invalid username or password.', 'danger')

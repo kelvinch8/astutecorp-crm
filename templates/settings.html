@@ -114,6 +114,7 @@
         </form>
 
         <form method="post" action="{{ url_for('test_email') }}" class="d-inline ms-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-secondary">Send Test Email</button>
         </form>
     </div>
@@ -132,6 +133,7 @@
         </a>
         <form method="post" action="{{ url_for('import_database') }}" enctype="multipart/form-data" class="d-inline-block mt-2 mt-md-0"
               onsubmit="return confirm('Replace ALL data on this server with the uploaded database? This cannot be undone easily.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="input-group">
                 <input type="file" name="database" class="form-control" accept=".db,application/octet-stream" required>
                 <button type="submit" class="btn btn-outline-danger">Upload &amp; replace</button>

@@ -28,16 +28,19 @@
         <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn btn-outline-secondary btn-sm">Edit</a>
         {% if client.archived %}
         <form action="{{ url_for('client_unarchive', client_id=client.id) }}" method="post" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
         </form>
         {% else %}
         <form action="{{ url_for('client_archive', client_id=client.id) }}" method="post" class="d-inline"
               onsubmit="return confirm('Archive {{ client.name }}? They will be hidden from the active list and dashboard.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-warning btn-sm">Archive</button>
         </form>
         {% endif %}
         <form action="{{ url_for('client_delete', client_id=client.id) }}" method="post" class="d-inline"
               onsubmit="return confirm('Delete {{ client.name }}? This will permanently remove all deadlines, invoices, and notes for this client.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
         </form>
         <a href="{{ url_for('clients_list', view='archived' if client.archived else None) }}" class="btn btn-light btn-sm">Back</a>
@@ -52,6 +55,7 @@
                 <span><strong>Deadlines</strong></span>
                 <div class="page-actions">
                     <form action="{{ url_for('calculate_deadlines', client_id=client.id) }}" method="post" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-outline-primary">Calculate from FYE</button>
                     </form>
                     <a href="{{ url_for('deadline_new', client_id=client.id) }}" class="btn btn-sm btn-success">+ Deadline</a>
@@ -92,11 +96,13 @@
                                     <a href="{{ url_for('deadline_edit', client_id=client.id, dl_id=dl.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
                                     {% if dl.status != 'Completed' %}
                                     <form action="{{ url_for('deadline_complete', client_id=client.id, dl_id=dl.id) }}" method="post" class="m-0">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button class="btn btn-sm btn-success">Complete</button>
                                     </form>
                                     {% endif %}
                                     <form action="{{ url_for('deadline_delete', client_id=client.id, dl_id=dl.id) }}" method="post" class="m-0"
                                           onsubmit="return confirm('Delete this {{ dl.deadline_type | deadline_label }} deadline?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                                     </form>
                                 </div>
@@ -182,6 +188,7 @@
                             <a href="{{ url_for('invoice_edit', client_id=client.id, inv_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
                             {% if inv.status != 'Paid' %}
                             <form action="{{ url_for('invoice_paid', client_id=client.id, inv_id=inv.id) }}" method="post" class="d-inline m-0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button class="btn btn-sm btn-success">Paid</button>
                             </form>
                             {% endif %}
