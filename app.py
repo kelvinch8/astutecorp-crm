@@ -285,6 +285,20 @@ class ClientForm(FlaskForm):
     incorporation_date = DateField('Incorporation Date', validators=[Optional()])
     submit = SubmitField('Save Client')
 
+    def __init__(self, *args, client_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.client_id = client_id
+
+    def validate_uen(self, field):
+        field.data = (field.data or '').strip().upper()
+        query = Client.query.filter(db.func.upper(db.func.trim(Client.uen)) == field.data)
+        if self.client_id:
+            query = query.filter(Client.id != self.client_id)
+        existing = query.first()
+        if existing:
+            where = ' (archived)' if existing.archived else ''
+            raise ValidationError(f'UEN already used by {existing.name}{where}')
+
 class DeadlineForm(FlaskForm):
     deadline_type = SelectField('Deadline Type', choices=[
         ('FinancialYearEnd', 'Financial Year End'),
@@ -1296,7 +1310,7 @@ def client_detail(client_id):
 @login_required
 def client_edit(client_id):
     client = Client.query.get_or_404(client_id)
-    form = ClientForm(obj=client)
+    form = ClientForm(obj=client, client_id=client.id)
     if form.validate_on_submit():
         form.populate_obj(client)
         db.session.commit()
