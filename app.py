@@ -16,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import math
 import os
 import re
 import uuid
@@ -324,6 +325,22 @@ class InvoiceForm(FlaskForm):
     amount = StringField('Amount (SGD, optional)')
     due_date = DateField('Payment Due Date', validators=[DataRequired()])
     submit = SubmitField('Add Invoice')
+
+    def validate_amount(self, field):
+        try:
+            parse_amount(field.data)
+        except ValueError:
+            raise ValidationError('Enter a number, e.g. 1500 or 1,500.00')
+
+def parse_amount(value):
+    """'S$1,500.50' -> 1500.5; blank -> None; raises ValueError if not a non-negative number."""
+    cleaned = re.sub(r'(?i)sgd|s\$|\$|,|\s', '', value or '')
+    if not cleaned:
+        return None
+    amount = float(cleaned)
+    if amount < 0 or not math.isfinite(amount):
+        raise ValueError(value)
+    return amount
 
 class NoteForm(FlaskForm):
     title = StringField('Title / Action', validators=[DataRequired()])
@@ -1674,10 +1691,7 @@ def invoice_new(client_id):
     client = Client.query.get_or_404(client_id)
     form = InvoiceForm()
     if form.validate_on_submit():
-        try:
-            amount = float(form.amount.data) if form.amount.data else None
-        except:
-            amount = None
+        amount = parse_amount(form.amount.data)
 
         inv = Invoice(
             client_id=client_id,
@@ -1698,15 +1712,13 @@ def invoice_edit(client_id, inv_id):
     client = Client.query.get_or_404(client_id)
     inv = Invoice.query.filter_by(id=inv_id, client_id=client_id).first_or_404()
     form = InvoiceForm(obj=inv)
-    if inv.amount is not None:
-        form.amount.data = f'{inv.amount:g}'
+    # Only prefill on first load; on submit this would overwrite the amount just typed
+    if request.method == 'GET' and inv.amount is not None:
+        form.amount.data = f'{inv.amount:.2f}'.removesuffix('.00')
     form.submit.label.text = 'Save Changes'
 
     if form.validate_on_submit():
-        try:
-            amount = float(form.amount.data) if form.amount.data else None
-        except ValueError:
-            amount = None
+        amount = parse_amount(form.amount.data)
 
         inv.invoice_type = form.invoice_type.data
         inv.description = form.description.data
