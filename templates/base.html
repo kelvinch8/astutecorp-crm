@@ -323,6 +323,17 @@
             color: var(--crm-navy) !important;
         }
 
+        /* Dashboard deadline lists: dates first in a fixed column so they line up */
+        .dl-line {
+            display: grid;
+            grid-template-columns: 6.5rem auto;
+            column-gap: 0.6rem;
+            align-items: baseline;
+        }
+        .dl-line + .dl-line { margin-top: 0.35rem; }
+        .dl-line .dl-note { grid-column: 2; }
+        .dl-date, .nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
         /* Deadline type badges — each type has its own colour */
         .badge.badge-deadline {
             font-weight: 600;

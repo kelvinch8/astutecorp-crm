@@ -77,8 +77,8 @@
                 <div class="text-muted small">{{ dl.comments }}</div>
                 {% endif %}
             </td>
-            <td>{{ dl.due_date | format_date }}</td>
-            <td><span class="badge bg-danger">{{ dl.get_days_left()|abs }} days</span></td>
+            <td class="nowrap">{{ dl.due_date | format_date }}</td>
+            <td><span class="badge bg-danger">{{ dl.get_days_left()|abs }} day{{ '' if dl.get_days_left()|abs == 1 else 's' }}</span></td>
             <td><a href="{{ url_for('client_detail', client_id=dl.client.id) }}" class="btn btn-sm btn-danger">Manage</a></td>
         </tr>
         {% endfor %}
@@ -98,8 +98,8 @@
         <tr>
             <th>Client</th>
             <th>Deadlines</th>
-            <th>Next Due</th>
-            <th>Days Left</th>
+            <th class="nowrap">Next Due</th>
+            <th class="nowrap">Days Left</th>
             <th>Action</th>
         </tr>
     </thead>
@@ -107,23 +107,23 @@
         {% for group in upcoming_by_client %}
         <tr>
             <td><a href="{{ url_for('client_detail', client_id=group.client.id) }}">{{ group.client.name }}</a></td>
-            <td style="min-width: 12rem; white-space: normal;">
+            <td style="min-width: 16rem; white-space: normal;">
                 {% for dl in group.deadlines %}
-                <div class="{% if not loop.last %}mb-1{% endif %}">
-                    <span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span>
-                    {{ dl.due_date | format_date }}
+                <div class="dl-line">
+                    <span class="dl-date">{{ dl.due_date | format_date }}</span>
+                    <span><span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span></span>
                     {% if dl.comments %}
-                    <div class="text-muted small">{{ dl.comments }}</div>
+                    <div class="dl-note text-muted small">{{ dl.comments }}</div>
                     {% endif %}
                 </div>
                 {% endfor %}
             </td>
-            <td>{{ group.earliest_due | format_date }}</td>
+            <td class="nowrap">{{ group.earliest_due | format_date }}</td>
             <td>
                 {% if group.soonest_days_left <= 7 %}
-                    <span class="badge bg-warning">{{ group.soonest_days_left }} days</span>
+                    <span class="badge bg-warning">{{ group.soonest_days_left }} day{{ '' if group.soonest_days_left == 1 else 's' }}</span>
                 {% else %}
-                    {{ group.soonest_days_left }} days
+                    {{ group.soonest_days_left }} day{{ '' if group.soonest_days_left == 1 else 's' }}
                 {% endif %}
             </td>
             <td>
@@ -161,12 +161,12 @@
                 <span class="badge badge-invoice {% if inv.invoice_type == 'Secretarial Fee' %}badge-invoice-secretarial{% elif inv.invoice_type == 'Registered Address' %}badge-invoice-address{% elif inv.invoice_type == 'Director Fee' %}badge-invoice-director{% else %}badge-invoice-other{% endif %}">{{ inv.invoice_type }}</span>
             </td>
             <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
-            <td>{{ inv.due_date | format_date }}</td>
+            <td class="nowrap">{{ inv.due_date | format_date }}</td>
             <td>
                 {% if inv.get_days_left() <= 7 %}
-                    <span class="badge bg-warning">{{ inv.get_days_left() }} days</span>
+                    <span class="badge bg-warning">{{ inv.get_days_left() }} day{{ '' if inv.get_days_left() == 1 else 's' }}</span>
                 {% else %}
-                    {{ inv.get_days_left() }} days
+                    {{ inv.get_days_left() }} day{{ '' if inv.get_days_left() == 1 else 's' }}
                 {% endif %}
             </td>
             <td>
@@ -202,8 +202,8 @@
             <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}">{{ inv.client.name }}</a></td>
             <td>{{ inv.invoice_type }}</td>
             <td>{% if inv.amount %}${{ "%.2f"|format(inv.amount) }}{% else %}-{% endif %}</td>
-            <td>{{ inv.due_date | format_date }}</td>
-            <td><span class="badge bg-danger">{{ inv.get_days_left()|abs }} days</span></td>
+            <td class="nowrap">{{ inv.due_date | format_date }}</td>
+            <td><span class="badge bg-danger">{{ inv.get_days_left()|abs }} day{{ '' if inv.get_days_left()|abs == 1 else 's' }}</span></td>
             <td><a href="{{ url_for('client_detail', client_id=inv.client.id) }}" class="btn btn-sm btn-danger">Manage</a></td>
         </tr>
         {% endfor %}
