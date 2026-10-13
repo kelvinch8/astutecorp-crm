@@ -733,6 +733,13 @@ def format_date(value):
 def format_datetime(value):
     return format_date_display(value, include_time=True)
 
+def add_months_keep_month_end(start, months):
+    """Add months, keeping month-end dates at month-end (30 Sep + 3 months = 31 Dec)."""
+    result = start + relativedelta(months=months)
+    if (start + timedelta(days=1)).month != start.month:
+        result = result + relativedelta(day=31)
+    return result
+
 def calculate_default_deadlines(fye_date):
     """Suggest default deadlines based on an existing Financial Year End date."""
     if not fye_date:
@@ -741,15 +748,15 @@ def calculate_default_deadlines(fye_date):
     deadlines = []
 
     # ECI: 3 months after financial year end
-    eci_due = fye_date + relativedelta(months=3)
+    eci_due = add_months_keep_month_end(fye_date, 3)
     deadlines.append(('ECI', eci_due))
 
     # AGM: 6 months after financial year end
-    agm_due = fye_date + relativedelta(months=6)
+    agm_due = add_months_keep_month_end(fye_date, 6)
     deadlines.append(('AGM', agm_due))
 
     # Annual Return: assume 1 month after AGM (common practice)
-    ar_due = agm_due + relativedelta(months=1)
+    ar_due = add_months_keep_month_end(fye_date, 7)
     deadlines.append(('AnnualReturn', ar_due))
 
     # Income Tax Filing: 30 November of the year following FYE
@@ -1586,10 +1593,11 @@ def calculate_deadlines(client_id):
     for fye_deadline in fye_deadlines:
         suggestions = calculate_default_deadlines(fye_deadline.due_date)
         for dtype, ddate in suggestions:
-            existing = Deadline.query.filter_by(
-                client_id=client_id,
-                deadline_type=dtype,
-                due_date=ddate
+            # Within a week counts as existing (older calculations landed 1-3 days before month-end)
+            existing = Deadline.query.filter(
+                Deadline.client_id == client_id,
+                Deadline.deadline_type == dtype,
+                Deadline.due_date.between(ddate - timedelta(days=7), ddate + timedelta(days=7))
             ).first()
             if not existing:
                 dl = Deadline(client_id=client_id, deadline_type=dtype, due_date=ddate)
