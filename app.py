@@ -1080,13 +1080,15 @@ def _check_and_send_reminders():
 @login_required
 def dashboard():
     today = date.today()
-    sixty_days_out = today + timedelta(days=60)
+    # ?view=year shows every upcoming deadline and invoice for the next 12 months
+    year_view = request.args.get('view') == 'year'
+    horizon = today + (relativedelta(years=1) if year_view else timedelta(days=60))
     # Overdue status with a future date means the due date was pushed out after the daily job flagged it
     upcoming = Deadline.query.join(Client).filter(
         Client.archived == False,
         Deadline.status.in_(['Pending', 'Overdue']),
         Deadline.due_date >= today,
-        Deadline.due_date <= sixty_days_out
+        Deadline.due_date <= horizon
     ).order_by(Deadline.due_date).all()
     upcoming_by_client = group_deadlines_by_client(upcoming)
 
@@ -1098,11 +1100,15 @@ def dashboard():
         Deadline.due_date < today
     ).order_by(Deadline.due_date).all()
 
-    upcoming_invoices = Invoice.query.join(Client).filter(
+    upcoming_invoices_query = Invoice.query.join(Client).filter(
         Client.archived == False,
         Invoice.status.in_(['Pending', 'Overdue']),
         Invoice.due_date >= today
-    ).order_by(Invoice.due_date).limit(10).all()
+    ).order_by(Invoice.due_date)
+    if year_view:
+        upcoming_invoices = upcoming_invoices_query.filter(Invoice.due_date <= horizon).all()
+    else:
+        upcoming_invoices = upcoming_invoices_query.limit(10).all()
 
     overdue_invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
@@ -1127,7 +1133,8 @@ def dashboard():
                            upcoming_invoices=upcoming_invoices,
                            overdue_invoices=overdue_invoices,
                            clients_count=clients_count,
-                           pending_count=pending_deadlines + pending_invoices)
+                           pending_count=pending_deadlines + pending_invoices,
+                           year_view=year_view)
 
 CLIENT_EXPORT_HEADERS = [
     'Status', 'Client Name', 'UEN', 'Contact Person', 'Email', 'Phone',

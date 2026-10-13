@@ -39,7 +39,7 @@
         <div class="card text-center stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title">{{ upcoming|length }}</h3>
-                <p class="card-text text-muted">Upcoming Deadlines</p>
+                <p class="card-text text-muted">Upcoming Deadlines<br><small>{{ 'next 12 months' if year_view else 'next 60 days' }}</small></p>
             </div>
         </div>
     </div>
@@ -47,7 +47,7 @@
         <div class="card text-center stat-card h-100">
             <div class="card-body">
                 <h3 class="card-title">{{ upcoming_invoices|length }}</h3>
-                <p class="card-text text-muted">Upcoming Invoices</p>
+                <p class="card-text text-muted">Upcoming Invoices<br><small>{{ 'next 12 months' if year_view else 'next 10' }}</small></p>
             </div>
         </div>
     </div>
@@ -89,7 +89,18 @@
 <div class="alert alert-success">No overdue deadlines.</div>
 {% endif %}
 
-<h4 class="mt-4 mb-3">Upcoming Deadlines (Next 60 Days)</h4>
+{% if year_view %}
+<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-2 mt-4" id="upcoming">
+    <span>Showing <strong>all upcoming deadlines and invoices for the next 12 months</strong>.</span>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">Exit 12-month view</a>
+</div>
+{% endif %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-4 mb-3"{% if not year_view %} id="upcoming"{% endif %}>
+    <h4 class="mb-0">Upcoming Deadlines ({{ 'Next 12 Months' if year_view else 'Next 60 Days' }})</h4>
+    {% if not year_view %}
+    <a href="{{ url_for('dashboard', view='year') }}#upcoming" class="btn btn-sm btn-outline-primary">Show next 12 months</a>
+    {% endif %}
+</div>
 
 {% if upcoming_by_client %}
 <div class="table-responsive">
@@ -138,7 +149,14 @@
 <div class="alert alert-info">No upcoming deadlines.</div>
 {% endif %}
 
-<h4 class="mt-4">Upcoming Invoice Payments</h4>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-4 mb-2" id="upcoming-invoices">
+    <h4 class="mb-0">Upcoming Invoice Payments{{ ' (Next 12 Months)' if year_view else '' }}</h4>
+    {% if year_view %}
+    <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">Exit 12-month view</a>
+    {% else %}
+    <a href="{{ url_for('dashboard', view='year') }}#upcoming-invoices" class="btn btn-sm btn-outline-primary">Show all (next 12 months)</a>
+    {% endif %}
+</div>
 
 {% if upcoming_invoices %}
 <div class="table-responsive">
