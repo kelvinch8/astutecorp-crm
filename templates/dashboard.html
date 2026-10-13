@@ -60,7 +60,7 @@
 <table class="table table-hover table-danger">
     <thead>
         <tr>
-            <th>Client</th>
+            <th class="col-client">Client</th>
             <th>Type</th>
             <th>Due Date</th>
             <th>Overdue By</th>
@@ -74,7 +74,7 @@
             <td style="min-width: 10rem; white-space: normal;">
                 <span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span>
                 {% if dl.comments %}
-                <div class="text-muted small">{{ dl.comments }}</div>
+                <div class="note-clamp text-muted small" title="{{ dl.comments }}">{{ dl.comments }}</div>
                 {% endif %}
             </td>
             <td class="nowrap">{{ dl.due_date | format_date }}</td>
@@ -96,7 +96,7 @@
 <table class="table table-hover">
     <thead>
         <tr>
-            <th>Client</th>
+            <th class="col-client">Client</th>
             <th>Deadlines</th>
             <th class="nowrap">Next Due</th>
             <th class="nowrap">Days Left</th>
@@ -113,7 +113,7 @@
                     <span class="dl-date">{{ dl.due_date | format_date }}</span>
                     <span><span class="badge badge-deadline {{ dl.deadline_type | deadline_badge_class }}">{{ dl.deadline_type | deadline_label }}</span></span>
                     {% if dl.comments %}
-                    <div class="dl-note text-muted small">{{ dl.comments }}</div>
+                    <div class="dl-note note-clamp text-muted small" title="{{ dl.comments }}">{{ dl.comments }}</div>
                     {% endif %}
                 </div>
                 {% endfor %}
