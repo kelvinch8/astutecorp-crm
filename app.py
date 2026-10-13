@@ -967,6 +967,11 @@ def _check_and_send_reminders():
                     sent_count += 1
             continue
 
+        # Due date was moved out after being flagged Overdue → back to Pending
+        if dl.status == 'Overdue':
+            dl.status = 'Pending'
+            db.session.commit()
+
         # Due today → email you (treated as urgent / overdue-style notice)
         if days_left == 0:
             if not already_reminded_today:
@@ -998,9 +1003,10 @@ def _check_and_send_reminders():
 def dashboard():
     today = date.today()
     sixty_days_out = today + timedelta(days=60)
+    # Overdue status with a future date means the due date was pushed out after the daily job flagged it
     upcoming = Deadline.query.join(Client).filter(
         Client.archived == False,
-        Deadline.status == 'Pending',
+        Deadline.status.in_(['Pending', 'Overdue']),
         Deadline.due_date >= today,
         Deadline.due_date <= sixty_days_out
     ).order_by(Deadline.due_date).all()
@@ -1482,6 +1488,10 @@ def deadline_edit(client_id, dl_id):
         dl.due_date = form.due_date.data
         dl.reminder_days = form.reminder_days.data
         dl.comments = form.comments.data
+        # Moving an Overdue deadline to a future date makes it Pending again
+        if dl.status == 'Overdue' and dl.due_date >= date.today():
+            dl.status = 'Pending'
+            dl.last_reminded = None
         db.session.commit()
         flash('Deadline updated successfully.', 'success')
         return redirect(url_for('client_detail', client_id=client_id))
