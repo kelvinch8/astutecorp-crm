@@ -986,11 +986,13 @@ def _check_and_send_reminders():
 
     invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
-        Invoice.status == 'Pending'
+        Invoice.status.in_(['Pending', 'Overdue'])
     ).all()
     for inv in invoices:
-        if inv.get_days_left() <= 0:
-            inv.status = 'Overdue'
+        # Overdue only once past due, matching the dashboard's overdue list
+        new_status = 'Overdue' if inv.get_days_left() < 0 else 'Pending'
+        if inv.status != new_status:
+            inv.status = new_status
             db.session.commit()
 
     print(f"Reminder check complete. Sent {sent_count} deadline reminders.")
@@ -1022,7 +1024,7 @@ def dashboard():
 
     upcoming_invoices = Invoice.query.join(Client).filter(
         Client.archived == False,
-        Invoice.status == 'Pending',
+        Invoice.status.in_(['Pending', 'Overdue']),
         Invoice.due_date >= today
     ).order_by(Invoice.due_date).limit(10).all()
 
@@ -1645,6 +1647,9 @@ def invoice_edit(client_id, inv_id):
         inv.description = form.description.data
         inv.amount = amount
         inv.due_date = form.due_date.data
+        # Moving an Overdue invoice to today or later makes it Pending again
+        if inv.status == 'Overdue' and inv.due_date >= date.today():
+            inv.status = 'Pending'
         db.session.commit()
         flash('Invoice updated successfully.', 'success')
         return redirect(url_for('client_detail', client_id=client_id))
