@@ -969,6 +969,9 @@ def _check_and_send_reminders():
             if dl.status != 'Overdue':
                 dl.status = 'Overdue'
                 db.session.commit()
+            # An FYE is a reference date, not a filing: no daily overdue emails once it passes
+            if dl.deadline_type == 'FinancialYearEnd':
+                continue
             if not already_reminded_today:
                 if send_deadline_reminder(dl, overdue=True):
                     sent_count += 1
