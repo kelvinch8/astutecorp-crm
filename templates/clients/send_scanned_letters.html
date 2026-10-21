@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Send scanned letters — {{ client.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header mb-3">
+    <div>
+        <h3 class="mb-1">Send scanned letters</h3>
+        <p class="text-muted mb-0 small">
+            Email scanned copies of letters received for <strong>{{ client.name }}</strong>
+            (registered address service).
+            {% if client.email_list() %}
+            · Client email(s):
+            {% for e in client.email_list() %}
+            <code>{{ e }}</code>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+            {% else %}
+            · <span class="text-danger">No client email on file</span> (add under Edit Client, or send to yourself only)
+            {% endif %}
+        </p>
+    </div>
+    <div class="page-actions">
+        <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-outline-secondary btn-sm">Back to client</a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header"><strong>Compose email</strong></div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Attach the scanned letter(s), edit the subject and message if needed, then choose who receives it.
+                    Every address saved on the client record will receive the email.
+                    A log entry with the scans is added under <strong>Activity &amp; Notes History</strong>.
+                </p>
+                <form method="post" enctype="multipart/form-data">
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.attachments.label(class="form-label") }}
+                        {{ form.attachments(class="form-control", multiple=true, required=true, accept=".pdf,.png,.jpg,.jpeg,.heic,.gif,.webp,.doc,.docx") }}
+                        <div class="form-text">PDF or image. You can select several files (up to 16 MB total).</div>
+                        {% for error in form.attachments.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.subject.label(class="form-label") }}
+                        {{ form.subject(class="form-control") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.body.label(class="form-label") }}
+                        {{ form.body(class="form-control", rows="14") }}
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.send_to_client.label(class="form-label") }}
+                            {{ form.send_to_client(class="form-select") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.send_to_me.label(class="form-label") }}
+                            {{ form.send_to_me(class="form-select") }}
+                            <div class="form-text">Copy to your address in Settings.</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-file-earmark-arrow-up"></i> {{ form.submit.label.text }}
+                    </button>
+                    <a href="{{ url_for('client_detail', client_id=client.id) }}" class="btn btn-outline-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="alert alert-light border small">
+            <strong>Registered address service</strong>
+            <p class="mb-0 mt-2">
+                Use this to send the client a scanned copy of mail received at your office.
+                The default text says the original will be disposed within 3 working days — edit freely before sending.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

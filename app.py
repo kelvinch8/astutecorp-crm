@@ -514,6 +514,13 @@ class ClientLettersForm(FlaskForm):
         choices=[('True', 'Yes'), ('False', 'No')],
         default='True',
     )
+    submit = SubmitField('Send letters notice')
+
+
+class ClientScannedLettersForm(FlaskForm):
+    """Email scanned copies of letters received for the client."""
+    subject = StringField('Email subject', validators=[DataRequired(), Length(max=300)])
+    body = TextAreaField('Email message', validators=[DataRequired(), Length(max=10000)])
     attachments = MultipleFileField(
         'Scanned letter(s)',
         validators=[
@@ -523,7 +530,17 @@ class ClientLettersForm(FlaskForm):
             )
         ],
     )
-    submit = SubmitField('Send letters notice')
+    send_to_me = SelectField(
+        'Email me a copy',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    send_to_client = SelectField(
+        'Email the client',
+        choices=[('True', 'Yes'), ('False', 'No')],
+        default='True',
+    )
+    submit = SubmitField('Send scanned letters')
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -569,6 +586,18 @@ DEFAULT_LETTERS_BODY = (
     'If you have any questions, please reply to this email.\n\n'
     'Best regards,\n'
     'Astute Solutions'
+)
+
+DEFAULT_SCANNED_LETTERS_SUBJECT = 'Scanned letter(s) — {client_name}'
+DEFAULT_SCANNED_LETTERS_BODY = (
+    'Dear {contact_person},\n\n'
+    'Please find attached a scanned copy of the letter(s) we have received for '
+    '{client_name} (UEN: {uen}) at our office under our registered address service.\n\n'
+    'The original letter will be disposed of in 3 working days. '
+    'Please let us know if you would like to retain the original copy.\n\n'
+    'If you have any questions, please reply to this email.\n\n'
+    'Best regards,\n'
+    'Astute Corporate Solutions Pte. Ltd.'
 )
 
 DEFAULT_INTERNAL_REMINDER_SUBJECT = 'Upcoming deadline: {client_name} - {deadline_type} in {days_remaining} days'
@@ -1008,6 +1037,18 @@ def build_letters_notice_defaults(client):
     }
     subject = render_reminder_template(DEFAULT_LETTERS_SUBJECT, **values)
     body = render_reminder_template(DEFAULT_LETTERS_BODY, **values)
+    return subject, body
+
+
+def build_scanned_letters_defaults(client):
+    """Default subject/body for emailing scanned letters to the client."""
+    values = {
+        'contact_person': client.contact_person or 'Client',
+        'client_name': client.name,
+        'uen': client.uen or '-',
+    }
+    subject = render_reminder_template(DEFAULT_SCANNED_LETTERS_SUBJECT, **values)
+    body = render_reminder_template(DEFAULT_SCANNED_LETTERS_BODY, **values)
     return subject, body
 
 def send_test_reminder_email():
@@ -1495,7 +1536,80 @@ def client_send_letters(client_id):
 
         subject = form.subject.data.strip()
         body = form.body.data.strip()
+        sent = []
+        failed = []
+
+        if to_me:
+            if send_email(settings.my_email, f'[AstuteCorp CRM] {subject}', body):
+                sent.append(f'you ({settings.my_email})')
+            else:
+                failed.append(f'you ({_last_email_error or "error"})')
+
+        if to_client:
+            if not client_emails:
+                failed.append('client (no email on file)')
+            else:
+                ok, bad = send_email_to_each(client_emails, subject, body)
+                for e in ok:
+                    sent.append(f'client ({e})')
+                for e in bad:
+                    failed.append(f'client ({e}: {_last_email_error or "error"})')
+
+        if sent:
+            note_title = f'Letters collection notice sent: {subject[:140]}'
+            if len(subject) > 140:
+                note_title = f'Letters collection notice sent: {subject[:137]}...'
+            db.session.add(Note(
+                client_id=client.id,
+                title=note_title,
+                content='',
+                category='Client',
+            ))
+            db.session.commit()
+            flash(
+                f'Letters notice sent to: {", ".join(sent)}. Logged in Activity & Notes.',
+                'success',
+            )
+        if failed:
+            flash(f'Could not send to: {", ".join(failed)}.', 'danger')
+        if sent:
+            return redirect(url_for('client_detail', client_id=client_id))
+
+    return render_template('clients/send_letters.html', form=form, client=client)
+
+
+@app.route('/clients/<int:client_id>/send-scanned-letters', methods=['GET', 'POST'])
+@login_required
+def client_send_scanned_letters(client_id):
+    """Email scanned copies of letters received for the client (registered address service)."""
+    client = Client.query.get_or_404(client_id)
+    settings = Setting.query.first()
+    form = ClientScannedLettersForm()
+    client_emails = client.email_list()
+
+    if request.method == 'GET':
+        subject, body = build_scanned_letters_defaults(client)
+        form.subject.data = subject
+        form.body.data = body
+        form.send_to_client.data = 'True' if client_emails else 'False'
+        form.send_to_me.data = 'True'
+
+    if form.validate_on_submit():
+        to_me = form.send_to_me.data == 'True'
+        to_client = form.send_to_client.data == 'True'
         uploads = [f for f in request.files.getlist('attachments') if f and f.filename]
+        if not uploads:
+            flash('Attach at least one scanned letter.', 'warning')
+            return render_template('clients/send_scanned_letters.html', form=form, client=client)
+        if not to_me and not to_client:
+            flash('Choose at least one recipient: you and/or the client.', 'warning')
+            return render_template('clients/send_scanned_letters.html', form=form, client=client)
+        if not settings or not settings.my_email:
+            flash('Configure Your Email and SMTP in Settings before sending.', 'danger')
+            return redirect(url_for('settings'))
+
+        subject = form.subject.data.strip()
+        body = form.body.data.strip()
         attachments = []
         for f in uploads:
             attachments.append((f.filename, f.read()))
@@ -1522,9 +1636,9 @@ def client_send_letters(client_id):
                     failed.append(f'client ({e}: {_last_email_error or "error"})')
 
         if sent:
-            note_title = f'Letters collection notice sent: {subject[:140]}'
-            if len(subject) > 140:
-                note_title = f'Letters collection notice sent: {subject[:137]}...'
+            note_title = f'Scanned letters sent: {subject[:150]}'
+            if len(subject) > 150:
+                note_title = f'Scanned letters sent: {subject[:147]}...'
             note = Note(
                 client_id=client.id,
                 title=note_title,
@@ -1535,9 +1649,9 @@ def client_send_letters(client_id):
             db.session.flush()
             save_note_attachments(note, uploads)
             db.session.commit()
-            attached = f' with {len(uploads)} attachment{"s" if len(uploads) != 1 else ""}' if uploads else ''
             flash(
-                f'Letters notice{attached} sent to: {", ".join(sent)}. Logged in Activity & Notes.',
+                f'Scanned letters ({len(uploads)} file{"s" if len(uploads) != 1 else ""}) sent to: '
+                f'{", ".join(sent)}. Logged in Activity & Notes.',
                 'success',
             )
         if failed:
@@ -1545,7 +1659,7 @@ def client_send_letters(client_id):
         if sent:
             return redirect(url_for('client_detail', client_id=client_id))
 
-    return render_template('clients/send_letters.html', form=form, client=client)
+    return render_template('clients/send_scanned_letters.html', form=form, client=client)
 
 
 @app.route('/clients/<int:client_id>/delete', methods=['POST'])

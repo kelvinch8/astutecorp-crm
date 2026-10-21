@@ -25,6 +25,9 @@
         <a href="{{ url_for('client_send_letters', client_id=client.id) }}" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-mailbox"></i> Letters for collection
         </a>
+        <a href="{{ url_for('client_send_scanned_letters', client_id=client.id) }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-file-earmark-arrow-up"></i> Send scanned letters
+        </a>
         <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn btn-outline-secondary btn-sm">Edit</a>
         {% if client.archived %}
         <form action="{{ url_for('client_unarchive', client_id=client.id) }}" method="post" class="d-inline">
@@ -216,7 +219,7 @@
                     <small class="text-muted text-nowrap ms-2">{{ note.timestamp | format_datetime }}</small>
                 </div>
                 {# Email notices: title + date only (no full message body) #}
-                {% set is_email_log = note.title.startswith('Email reminder sent:') or note.title.startswith('Letters collection notice sent:') %}
+                {% set is_email_log = note.title.startswith('Email reminder sent:') or note.title.startswith('Letters collection notice sent:') or note.title.startswith('Scanned letters sent:') %}
                 {% if note.content and not is_email_log %}
                     <p class="mb-1">{{ note.content }}</p>
                 {% endif %}
