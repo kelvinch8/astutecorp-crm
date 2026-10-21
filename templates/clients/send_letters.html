@@ -34,7 +34,7 @@
                     Every address saved on the client record will receive the notice.
                     A short log entry is added under <strong>Activity &amp; Notes History</strong>.
                 </p>
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     {{ form.hidden_tag() }}
                     <div class="mb-3">
                         {{ form.subject.label(class="form-label") }}
@@ -43,6 +43,14 @@
                     <div class="mb-3">
                         {{ form.body.label(class="form-label") }}
                         {{ form.body(class="form-control", rows="12") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.attachments.label(class="form-label") }}
+                        {{ form.attachments(class="form-control", multiple=true, accept=".pdf,.png,.jpg,.jpeg,.heic,.gif,.webp,.doc,.docx") }}
+                        <div class="form-text">Optional. Attach the scanned letter(s) (PDF or image, up to 16 MB total). They're also saved with the Activity &amp; Notes entry.</div>
+                        {% for error in form.attachments.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">

@@ -16,6 +16,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import mimetypes
 import math
 import os
 import re
@@ -511,6 +514,15 @@ class ClientLettersForm(FlaskForm):
         choices=[('True', 'Yes'), ('False', 'No')],
         default='True',
     )
+    attachments = MultipleFileField(
+        'Scanned letter(s)',
+        validators=[
+            FileAllowed(
+                list(ALLOWED_NOTE_EXTENSIONS),
+                'Allowed types: PDF, images, Word, Excel, CSV, TXT, ZIP',
+            )
+        ],
+    )
     submit = SubmitField('Send letters notice')
 
 # ==================== HELPER FUNCTIONS ====================
@@ -874,8 +886,11 @@ def get_fye_reference_deadlines(client_id):
 
 _last_email_error = None
 
-def send_email(to_email, subject, body, is_html=False):
-    """Send email using settings from DB. to_email may be one address or a list."""
+def send_email(to_email, subject, body, is_html=False, attachments=None):
+    """Send email using settings from DB. to_email may be one address or a list.
+
+    attachments: optional list of (filename, bytes) tuples.
+    """
     global _last_email_error
     settings = Setting.query.first()
     if not settings or not settings.my_email:
@@ -911,6 +926,15 @@ def send_email(to_email, subject, body, is_html=False):
         else:
             msg.attach(MIMEText(body, 'plain'))
 
+        for filename, data in attachments or []:
+            mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            maintype, subtype = mime_type.split('/', 1)
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(data)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', 'attachment', filename=filename)
+            msg.attach(part)
+
         server = smtplib.SMTP(settings.smtp_server, settings.smtp_port, timeout=30)
         if settings.use_tls:
             server.starttls()
@@ -926,12 +950,12 @@ def send_email(to_email, subject, body, is_html=False):
         return False
 
 
-def send_email_to_each(emails, subject, body, is_html=False):
+def send_email_to_each(emails, subject, body, is_html=False, attachments=None):
     """Send the same email to each address individually. Returns (sent_list, failed_list)."""
     sent = []
     failed = []
     for email in emails:
-        if send_email(email, subject, body, is_html=is_html):
+        if send_email(email, subject, body, is_html=is_html, attachments=attachments):
             sent.append(email)
         else:
             failed.append(email)
@@ -1471,11 +1495,17 @@ def client_send_letters(client_id):
 
         subject = form.subject.data.strip()
         body = form.body.data.strip()
+        uploads = [f for f in request.files.getlist('attachments') if f and f.filename]
+        attachments = []
+        for f in uploads:
+            attachments.append((f.filename, f.read()))
+            f.stream.seek(0)
         sent = []
         failed = []
 
         if to_me:
-            if send_email(settings.my_email, f'[AstuteCorp CRM] {subject}', body):
+            if send_email(settings.my_email, f'[AstuteCorp CRM] {subject}', body,
+                          attachments=attachments):
                 sent.append(f'you ({settings.my_email})')
             else:
                 failed.append(f'you ({_last_email_error or "error"})')
@@ -1484,7 +1514,8 @@ def client_send_letters(client_id):
             if not client_emails:
                 failed.append('client (no email on file)')
             else:
-                ok, bad = send_email_to_each(client_emails, subject, body)
+                ok, bad = send_email_to_each(client_emails, subject, body,
+                                             attachments=attachments)
                 for e in ok:
                     sent.append(f'client ({e})')
                 for e in bad:
@@ -1494,15 +1525,19 @@ def client_send_letters(client_id):
             note_title = f'Letters collection notice sent: {subject[:140]}'
             if len(subject) > 140:
                 note_title = f'Letters collection notice sent: {subject[:137]}...'
-            db.session.add(Note(
+            note = Note(
                 client_id=client.id,
                 title=note_title,
                 content='',
                 category='Client',
-            ))
+            )
+            db.session.add(note)
+            db.session.flush()
+            save_note_attachments(note, uploads)
             db.session.commit()
+            attached = f' with {len(uploads)} attachment{"s" if len(uploads) != 1 else ""}' if uploads else ''
             flash(
-                f'Letters notice sent to: {", ".join(sent)}. Logged in Activity & Notes.',
+                f'Letters notice{attached} sent to: {", ".join(sent)}. Logged in Activity & Notes.',
                 'success',
             )
         if failed:
