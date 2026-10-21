@@ -1610,10 +1610,7 @@ def client_send_scanned_letters(client_id):
 
         subject = form.subject.data.strip()
         body = form.body.data.strip()
-        attachments = []
-        for f in uploads:
-            attachments.append((f.filename, f.read()))
-            f.stream.seek(0)
+        attachments = [(f.filename, f.read()) for f in uploads]
         sent = []
         failed = []
 
@@ -1639,15 +1636,13 @@ def client_send_scanned_letters(client_id):
             note_title = f'Scanned letters sent: {subject[:150]}'
             if len(subject) > 150:
                 note_title = f'Scanned letters sent: {subject[:147]}...'
-            note = Note(
+            # Log only; the scans themselves are not stored in the CRM.
+            db.session.add(Note(
                 client_id=client.id,
                 title=note_title,
                 content='',
                 category='Client',
-            )
-            db.session.add(note)
-            db.session.flush()
-            save_note_attachments(note, uploads)
+            ))
             db.session.commit()
             flash(
                 f'Scanned letters ({len(uploads)} file{"s" if len(uploads) != 1 else ""}) sent to: '
